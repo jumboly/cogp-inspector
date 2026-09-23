@@ -1,11 +1,12 @@
 import { levelOfRowGroup } from '../../cogp/lod'
 import type { Inspection } from '../../inspect'
 import type { ByteRange } from '../../parquet/model'
-import type { Selection } from '../../state/store'
+import type { ChunkPages } from '../../parquet/pages'
+import type { Loadable, Selection } from '../../state/store'
 import { levelColor, NEUTRAL } from '../../util/color'
 import { columnRole, type ColumnRole } from '../inspector/columnRole'
 
-export type Lane = 'structure' | 'chunk'
+export type Lane = 'structure' | 'chunk' | 'page'
 
 export interface Segment {
   lane: Lane
@@ -52,8 +53,32 @@ export function buildSegments(ins: Inspection): Segment[] {
   return segs
 }
 
+export const DICT_COLOR = '#8e6c8a'
+export const HEADER_COLOR = '#222'
+
+/**
+ * 読み込み済みの Column Chunk のページ。ページ本体の上に、先頭のページヘッダを重ねて描く
+ * （ヘッダは 20 バイト前後なので、拡大したときだけ見える）。
+ */
+export function pageSegments(ins: Inspection, chunkPages: Record<string, Loadable<ChunkPages>>): Segment[] {
+  const segs: Segment[] = []
+  for (const [k, st] of Object.entries(chunkPages)) {
+    if (st.status !== 'ready') continue
+    const [rg, col] = k.split(':').map(Number)
+    const chunk = ins.file.rowGroups[rg].columns[col]
+    const color = ROLE_COLOR[columnRole(chunk.column, ins.geo)]
+    for (const p of st.data.pages) {
+      const sel: Selection = { kind: 'page', rg, col, page: p.index }
+      const name = `RG ${rg} · ${chunk.column.name} · Page #${p.index}${p.kind === 'dictionary' ? '（辞書）' : ''}`
+      segs.push({ lane: 'page', range: p.range, color: p.kind === 'dictionary' ? DICT_COLOR : color, label: name, sel })
+      if (p.header) segs.push({ lane: 'page', range: { start: p.range.start, end: p.range.start + p.header.headerSize }, color: HEADER_COLOR, label: `${name} のページヘッダ`, sel })
+    }
+  }
+  return segs
+}
+
 /** 選択に対応するファイル内の範囲。Level は「RG 0 から row_group_end まで」の連続範囲（prefix）になる */
-export function selectionRange(ins: Inspection, sel: Selection | null): ByteRange | undefined {
+export function selectionRange(ins: Inspection, sel: Selection | null, chunkPages?: Record<string, Loadable<ChunkPages>>): ByteRange | undefined {
   if (!sel) return undefined
   const { file, lod } = ins
   switch (sel.kind) {
@@ -61,6 +86,10 @@ export function selectionRange(ins: Inspection, sel: Selection | null): ByteRang
       return file.rowGroups[sel.rg].range
     case 'column':
       return file.rowGroups[sel.rg].columns[sel.col].range
+    case 'page': {
+      const st = chunkPages?.[`${sel.rg}:${sel.col}`]
+      return st?.status === 'ready' ? st.data.pages[sel.page]?.range : file.rowGroups[sel.rg].columns[sel.col].range
+    }
     case 'footer':
     case 'schema':
     case 'geo':

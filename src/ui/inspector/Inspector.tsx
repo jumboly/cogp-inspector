@@ -8,6 +8,7 @@ import { KV, RawJson } from '../common/KV'
 import { columnRole, ROLE_LABEL } from './columnRole'
 import { Help, Overview } from './help'
 import { LevelPrefix } from './LevelPrefix'
+import { ChunkPagesSection, PageView } from './PagesView'
 
 const size = (r: { start: number; end: number }) => r.end - r.start
 
@@ -130,6 +131,8 @@ function Body({ sel, ins }: { sel: Selection; ins: Inspection }) {
       return <RowGroupView ins={ins} rg={sel.rg} />
     case 'column':
       return <ColumnView ins={ins} chunk={file.rowGroups[sel.rg].columns[sel.col]} />
+    case 'page':
+      return <PageView ins={ins} rg={sel.rg} col={sel.col} page={sel.page} />
     case 'pageIndex': {
       const chunks = file.rowGroups.flatMap((r) => r.columns)
       const ci = chunks.filter((c) => c.columnIndex)
@@ -143,7 +146,7 @@ function Body({ sel, ins }: { sel: Selection; ins: Inspection }) {
             ['OffsetIndex', `${formatNumber(oi.length)} / ${formatNumber(chunks.length)} Column Chunk`, 'Page ごとの位置・サイズ・先頭行番号'],
             ['ColumnIndex', `${formatNumber(ci.length)} / ${formatNumber(chunks.length)} Column Chunk`, 'Page ごとの最小・最大値'],
             ['ColumnIndex のある列', cols.join(', ') || '-'],
-            ['中身の表示', 'Phase 2 で対応予定（Page 単位の絞り込み）'],
+            ['読み方', 'ファイルを開いた時点では読みません。Column Chunk を選ぶと、その Chunk の分だけを読みます'],
           ]}
         />
       )
@@ -360,6 +363,7 @@ function ColumnView({ ins, chunk: c }: { ins: Inspection; chunk: ColumnChunkMode
           ['file_offset', formatNumber(Number(c.raw.file_offset)), '非推奨：実装によって指す先が違うため使わない'],
         ]}
       />
+      <ChunkPagesSection ins={ins} chunk={c} />
       <RawJson summary="Raw ColumnChunk（Thrift をデコードしたもの）" text={toJsonText(c.raw)} />
     </>
   )

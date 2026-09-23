@@ -7,6 +7,7 @@ export const HELP: Partial<Record<Selection['kind'], { layer: 'Parquet' | 'GeoPa
   rowGroups: { layer: 'Parquet', text: 'Row Group は行をまとめた単位です。リーダーは Row Group 単位で読むか読まないかを決められます。' },
   rowGroup: { layer: 'Parquet', text: 'Row Group の中身は列ごとの Column Chunk に分かれています。必要な列の Column Chunk だけを読めるのが列指向の利点です。' },
   column: { layer: 'Parquet', text: 'Column Chunk は 1 つの Row Group の 1 列分のデータです。中はさらに Page に分かれ、統計値（最小・最大）が Footer に記録されます。' },
+  page: { layer: 'Parquet', text: 'Page は Column Chunk をさらに分けた、読み込み・展開（圧縮解除）の最小単位です。先頭にページヘッダがあり、種類・サイズ・値の数・符号化が書かれています。' },
   pageIndex: { layer: 'Parquet', text: 'Page Index は Page ごとの位置（OffsetIndex）と最小・最大値（ColumnIndex）です。Row Group より細かい単位で読み飛ばせるようになります。' },
   footer: { layer: 'Parquet', text: 'Footer（FileMetaData）には Schema、全 Row Group・Column Chunk の位置と統計値、key-value メタデータが入っています。リーダーは最初にここだけを読み、どこを読むべきかを決めます。' },
   trailer: { layer: 'Parquet', text: '末尾 8 バイトは Footer の長さ（4 バイト）と magic "PAR1" です。リーダーはまずこの 8 バイトを読み、Footer の位置を知ります。' },

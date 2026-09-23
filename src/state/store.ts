@@ -4,6 +4,7 @@ import { SourceError } from '../io/errors'
 import type { RandomAccessSource, ReadRecord } from '../io/source'
 import { TracedSource } from '../io/traced'
 import { inspect, type Inspection } from '../inspect'
+import { PageCache, type ChunkPages } from '../parquet/pages'
 
 /**
  * Tree / Map / Inspector / ByteMap が共有する「いま何を見ているか」。
@@ -21,11 +22,17 @@ export type Selection =
   | { kind: 'rowGroups' }
   | { kind: 'rowGroup'; rg: number }
   | { kind: 'column'; rg: number; col: number }
+  /** page は ChunkPages.pages の添字（辞書ページがあれば 0 が辞書ページ） */
+  | { kind: 'page'; rg: number; col: number; page: number }
   | { kind: 'pageIndex' }
   | { kind: 'reads' }
 
 /** 選択の発生元。地図以外で選んだときだけ地図をその場所へ動かす */
 export type SelectOrigin = 'map' | 'tree' | 'bytemap' | 'inspector'
+
+export type Loadable<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'error'; error: string }
+
+export const chunkKey = (rg: number, col: number) => `${rg}:${col}`
 
 interface State {
   status: 'idle' | 'loading' | 'ready' | 'error'
@@ -33,6 +40,10 @@ interface State {
   sourceName?: string
   sourceKind?: RandomAccessSource['kind']
   inspection?: Inspection
+  /** Footer 以降の読み込み（Page Index・ページヘッダ）に使う。読んだものはすべて reads に記録される */
+  pageCache?: PageCache
+  /** Column Chunk ごとのページ一覧（キーは chunkKey）。選んだ Column Chunk の分だけ読む */
+  chunkPages: Record<string, Loadable<ChunkPages>>
   reads: ReadRecord[]
   selection: Selection | null
   selectOrigin?: SelectOrigin
@@ -43,23 +54,25 @@ interface State {
   select: (s: Selection | null, origin: SelectOrigin) => void
   setViewLevel: (level: number | null) => void
   setHoverRowGroup: (rg: number | null) => void
+  loadChunkPages: (rg: number, col: number) => void
 }
 
 export const useStore = create<State>((set, get) => ({
   status: 'idle',
   reads: [],
+  chunkPages: {},
   selection: null,
   viewLevel: null,
   hoverRowGroup: null,
 
   async open(openSource) {
-    set({ status: 'loading', error: undefined, inspection: undefined, reads: [], selection: null, viewLevel: null, hoverRowGroup: null })
+    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, reads: [], selection: null, viewLevel: null, hoverRowGroup: null })
     try {
       const raw = await openSource()
       set({ sourceName: raw.name, sourceKind: raw.kind })
       const source = new TracedSource(raw, (r) => set({ reads: [...get().reads, r] }))
       const inspection = await inspect(source)
-      set({ status: 'ready', inspection, selection: { kind: 'file' }, selectOrigin: 'tree' })
+      set({ status: 'ready', inspection, pageCache: new PageCache(source, inspection.file), selection: { kind: 'file' }, selectOrigin: 'tree' })
     } catch (e) {
       const err = e instanceof SourceError ? { message: e.message, hint: e.hint } : { message: (e as Error).message }
       set({ status: 'error', error: err })
@@ -70,6 +83,7 @@ export const useStore = create<State>((set, get) => ({
     // Row Group を選んだら、その Row Group が属する Level も地図上で分かるよう表示 Level を合わせる
     const patch: Partial<State> = { selection, selectOrigin: origin }
     if (selection?.kind === 'level') patch.viewLevel = selection.level
+    if (selection?.kind === 'column' || selection?.kind === 'page') get().loadChunkPages(selection.rg, selection.col)
     if (selection?.kind === 'rowGroup') {
       const view = get().viewLevel
       const lod = get().inspection?.lod
@@ -80,4 +94,20 @@ export const useStore = create<State>((set, get) => ({
   },
   setViewLevel: (viewLevel) => set({ viewLevel }),
   setHoverRowGroup: (hoverRowGroup) => set({ hoverRowGroup }),
+
+  loadChunkPages(rg, col) {
+    const { pageCache, inspection, chunkPages } = get()
+    const k = chunkKey(rg, col)
+    if (!pageCache || !inspection || chunkPages[k]?.status === 'ready' || chunkPages[k]?.status === 'loading') return
+    const chunk = inspection.file.rowGroups[rg].columns[col]
+    set({ chunkPages: { ...chunkPages, [k]: { status: 'loading' } } })
+    const done = (v: Loadable<ChunkPages>) => {
+      // 読み込み中に別のファイルを開いていたら、古い結果は捨てる
+      if (get().pageCache === pageCache) set({ chunkPages: { ...get().chunkPages, [k]: v } })
+    }
+    pageCache.pages(chunk).then(
+      (data) => done({ status: 'ready', data }),
+      (e) => done({ status: 'error', error: (e as Error).message }),
+    )
+  },
 }))

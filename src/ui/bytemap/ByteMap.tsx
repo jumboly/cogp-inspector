@@ -4,12 +4,13 @@ import type { ByteRange } from '../../parquet/model'
 import { useStore } from '../../state/store'
 import { READ_COLOR, SELECT_COLOR } from '../../util/color'
 import { formatBytes, formatNumber } from '../../util/format'
-import { buildSegments, ROLE_COLOR, selectionRange, type Segment } from './segments'
+import { buildSegments, DICT_COLOR, pageSegments, ROLE_COLOR, selectionRange, type Segment } from './segments'
 
 const AXIS_H = 18
 const LANES = [
   { key: 'structure', label: '構造', h: 26 },
   { key: 'chunk', label: 'Column Chunk', h: 14 },
+  { key: 'page', label: 'Page', h: 14 },
   { key: 'reads', label: '読み込み', h: 14 },
 ] as const
 const LABEL_W = 92
@@ -58,14 +59,16 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
   const selection = useStore((s) => s.selection)
   const select = useStore((s) => s.select)
   const hoverRg = useStore((s) => s.hoverRowGroup)
+  const chunkPages = useStore((s) => s.chunkPages)
   const canvas = useRef<HTMLCanvasElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(800)
   const [view, setView] = useState<View>({ start: 0, end: ins.file.size })
   const [hover, setHover] = useState<Segment | { label: string; range: ByteRange } | null>(null)
   const drag = useRef<{ x: number; view: View; moved: boolean } | null>(null)
-  const segments = useMemo(() => buildSegments(ins), [ins])
-  const selRange = selectionRange(ins, selection)
+  const baseSegments = useMemo(() => buildSegments(ins), [ins])
+  const segments = useMemo(() => [...baseSegments, ...pageSegments(ins, chunkPages)], [baseSegments, ins, chunkPages])
+  const selRange = selectionRange(ins, selection, chunkPages)
 
   useEffect(() => {
     const el = wrap.current
@@ -122,7 +125,10 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
       g.beginPath()
       g.rect(LABEL_W, y, plotW, lane.h)
       g.clip()
-      if (lane.key === 'reads') {
+      if (lane.key === 'page' && !segments.some((s) => s.lane === 'page')) {
+        g.fillStyle = muted
+        g.fillText('Column Chunk を選ぶと、その Chunk のページを読んで表示します', LABEL_W + 6, y + lane.h / 2)
+      } else if (lane.key === 'reads') {
         g.fillStyle = READ_COLOR
         for (const r of reads) {
           const { x, w } = rect({ start: r.offset, end: r.offset + r.length })
@@ -134,6 +140,11 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
           const { x, w } = rect(s.range)
           g.fillStyle = s.color
           g.fillRect(x, y, w, lane.h)
+          // 隣り合うページが 1 本の帯に見えないよう、十分な幅があれば境目を描く
+          if (lane.key === 'page' && w > 4) {
+            g.fillStyle = 'rgba(255,255,255,0.7)'
+            g.fillRect(x, y, 1, lane.h)
+          }
           if (lane.key === 'structure' && w > 44) {
             g.fillStyle = '#fff'
             g.fillText(s.label.split(' · ')[0], Math.max(x, LABEL_W) + 3, y + lane.h / 2)
@@ -220,7 +231,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
         </button>
         <button onClick={() => zoomTo({ start: ins.file.pageIndex?.start ?? ins.file.footer.start, end: ins.file.size }, 0.05)}>末尾（Footer 周辺）へ</button>
         <span className="legend">
-          <i style={{ background: ROLE_COLOR.geometry }} /> geometry <i style={{ background: ROLE_COLOR.covering }} /> bbox covering <i style={{ background: ROLE_COLOR.attribute }} /> 属性 <i style={{ background: READ_COLOR }} /> 読んだ範囲
+          <i style={{ background: ROLE_COLOR.geometry }} /> geometry <i style={{ background: ROLE_COLOR.covering }} /> bbox covering <i style={{ background: ROLE_COLOR.attribute }} /> 属性 <i style={{ background: DICT_COLOR }} /> 辞書ページ <i style={{ background: READ_COLOR }} /> 読んだ範囲
         </span>
         <span className="muted bytemap-info">
           {hover

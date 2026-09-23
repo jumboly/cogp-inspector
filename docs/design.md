@@ -1,6 +1,6 @@
 # 設計メモ
 
-2026-09-23 時点の調査結果と決定事項。MVP は実装済み（§3.2 に実装時の判断を記録）。
+2026-09-23 時点の調査結果と決定事項。MVP は実装済み（§3.2 に実装時の判断を記録）。Phase 2 の判断は §3.3。
 推測を含む箇所は【推測】と明記する。
 
 ## 1. 目的と設計の優先順位
@@ -146,6 +146,29 @@ inspect page index → select pages → read byte ranges → decode` の段階�
 | D11 | Physical File Map | canvas。構造・Column Chunk（列の役割で色分け）・読み込みの 3 段。最小描画幅 2px、Level 選択時は prefix の連続範囲を枠で示す | 2.2GB 中の Footer（0.02%）も見えるようにする |
 | D12 | バイナリ列の統計 | BYTE_ARRAY で文字列系の論理型でない列（WKB など）は min/max を `<バイナリ N bytes>` と表示 | hyparquet は文字列化して返すため文字化けする |
 | D13 | 開発サーバー | `data/` を Range 付きで配信する Vite プラグイン。Range なしは 416 | URL で開く経路を手元で再現する。2.2GB を public/ に置くとビルドにコピーされるため |
+
+### 3.3 Phase 2 の判断（2026-09-23）
+
+D14〜D22 はユーザーと 1 問ずつ議論して決定。D23 以降は「以降はおすすめで進めて」の指示のもとおすすめ案で決定。
+
+| # | 論点 | 決定 | 理由 |
+|---|---|---|---|
+| D14 | 作る順番 | 下から 4 段階: A. Column Chunk 詳細・Page 一覧・辞書 → B. Page Index・Page bbox → C. Access Simulator → D. Range Request 可視化。段階ごとに commit + push | 後の段階が前の段階の上に乗るので手戻りがない |
+| D15 | Page Index を読む時機 | 必要になったときに、その分だけ読む（Row Group・Column Chunk の選択時、Simulator の候補 Row Group）。読んだものはキャッシュ | 開くときは Footer だけに保てる。「候補に残った分だけ Index を読む」本物のリーダーの読み方が Range 記録に現れる |
+| D16 | PageHeader を読む範囲 | Column Chunk を選んだときに、その Chunk のヘッダだけ読む。OffsetIndex があれば位置は OffsetIndex から、無ければ先頭から順にたどる | 1 回の操作の read 数を数十回に抑えつつ、Chunk 内のページを並べて比べられる |
+| D17 | Page bbox の組み立て | covering 4 列のページ境界（first_row_index）を合わせた「行範囲」を単位にし、各範囲に重なる各列のページの min/max で bbox を作る。境界がそろっているかを表示 | 列ごとにページの切れ目は独立。どのファイルでも保守的に正しく pruning でき、cogp-js の行範囲の考え方とも合う |
+| D18 | 表示縮尺 → 目標 resolution | cogp-js デモと同じ。地図の縦中央で横 100 CSS px の経度差 / 100（3857 のファイルは同じ方法で m / px） | 参照実装と同じ Level が選ばれる。resolution の単位（CRS の座標単位）とそのまま合う |
+| D19 | Simulator の起動 | 「Simulator モード」の ON/OFF。ON の間は地図の移動が止まるたびに自動実行し、Level セレクタは自動選択の結果を表示（手動変更不可） | 手動 Level と自動 Level の混同を防ぎ、「動かすと読む範囲が変わる」を体験できる |
+| D20 | 結果の見せ方 | Inspector の「Access Plan」に段階ごとの funnel（候補数とバイト数）。段階をクリックすると地図と Physical File Map が連動 | 既存の Selection の同期（D7）に乗せられ、新しいペインが要らない |
+| D21 | 読む列 | 列を選べる（既定は geometry + bbox covering 列）。全列を読んだ場合との差も表示 | 列指向の利点がバイト数の差として直接見える |
+| D22 | Range の合体 | cogp-js と同じく、重なり・隣接だけ合体し隙間は埋めない。合体前後の数を表示。Index の実際の読み込みも同じ方針で合体する | 参照実装と同じ数値になり、空間順の並びがリクエスト数を減らす効果が見える |
+
+実装メモ（段階 A）:
+
+- ページヘッダは最初 64 バイト読み、途中で切れていたら 4KiB → 64KiB → 1MiB と広げて読み直す（ページ単位の Statistics があるとヘッダが長くなるため）。
+- 公式サンプルの辞書ページヘッダは RG0 で 19B（8,103 件）、RG2 で 20B（46,751 件）。ヘッダ長は varint の桁数で変わる。
+- parquet-rs は同じ Row Group の OffsetIndex を列順に隙間なく書くため、1 Row Group 8 列分の OffsetIndex は合体して 1 回の read になる。
+- PageHeader の解析は hyparquet の内部モジュール（`src/thrift.js`, `src/constants.js`）に依存するため、hyparquet を `1.31.1` に固定した。
 
 ## 4. アーキテクチャ（MVP で実装済み）
 
