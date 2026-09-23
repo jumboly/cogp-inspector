@@ -1,6 +1,6 @@
 # 設計メモ
 
-2026-09-23 時点の調査結果と決定事項。MVP・Phase 2 は実装済み（実装時の判断は §3.2・§3.3）。Phase 3 も実装済み（判断と実装メモは §3.4）。
+2026-09-23 時点の調査結果と決定事項。MVP・Phase 2 は実装済み（実装時の判断は §3.2・§3.3）。Phase 3 も実装済み（判断と実装メモは §3.4）。GeoParquet 2.0 対応は §3.5、辞書の値と index の表示は §3.6。
 推測を含む箇所は【推測】と明記する。
 
 ## 1. 目的と設計の優先順位
@@ -374,6 +374,27 @@ D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「お
   元の順は 12.2MB → 11.0MB、Hilbert 順は 12.2MB → 10.8MB になった。COGP と COGP（2.0）はバイト単位で前と同じ（生成に再現性がある）。既定の 5 列に tags は入らないので、推定の読む量は変わらない。
 - 日付変更線をまたぐ bbox（段階 B）は、実ファイルでは確かめられていない。pyarrow は GEOMETRY では平面の bbox を書き、xmin > xmax のファイルを作れないため。
 
+### 3.6 辞書の値と index の表示（issue 05）の判断（2026-09-23）
+
+D53〜D57 はユーザーと 1 問ずつ議論して決定。D58 以降は「おすすめで進める」の指示のもとおすすめ案で決定。
+
+調査で分かったこと（2026-09-23 時点）:
+
+- サンプル 4 種類で辞書を使う列は `id`・`tags.key_value.key`・`tags.key_value.value`。`id` はほぼ一意なので辞書が効かず、`tags.key` は同じ値が何度も出るので最もよく効く。
+- tags は入れ子（Map）なので、データページには index の前に repetition / definition level が入る。level も index も RLE / Bit-Packing の混合形式（hybrid）。
+- hyparquet の `readRleBitPackedHybrid` は decode した値だけを返し、RLE と Bit-Packing の区切りは返さない。
+
+| # | 論点 | 決定 | 理由 |
+|---|---|---|---|
+| D53 | 読む時機と範囲 | データページの Inspector の「中身を読む」ボタンで、そのページと Column Chunk の辞書ページだけを読む。辞書ページは Column Chunk ごとにキャッシュ | 開くときは Footer だけ、選ぶときは Index とヘッダだけ、という方針を崩さない。読んだ量は Range 記録に残る |
+| D54 | index の decode | RLE / Bit-Packing の hybrid decoder を自作し、区切りごとに種類・ページ内のバイト位置・値の数を記録する。値は hyparquet の結果と突き合わせてテストする | 「同じ番号が続くと数バイトで済む」ことを区切りの単位で見せられる。自作部分は 50 行ほどで小さい |
+| D55 | 入れ子の列 | level も同じ decoder で読み、ページ本体を「rep level / def level / index」に分けてバイト数を出す。値ごとに行・null・index・辞書の値を並べる（rep level が 0 のところで行が変わる） | 1 行に複数の値が入る仕組みも一緒に見える。辞書が最も効く tags.key を対象から外さずに済む |
+| D56 | 効果の数値 | 読んだページの値を PLAIN で書いた場合のバイト数（BYTE_ARRAY は 4 + 長さ、INT64 は 8 など）と index 部分のバイト数を、どちらも圧縮前で比べる。辞書ページは Chunk の全ページで共有されるので別の行に出す。値ごとの出現回数を多い順に出す | 効かない列（id）は効かないことがそのまま数値に出る。圧縮後の比較は ZSTD の圧縮器が要るので行わない |
+| D57 | 一覧の見せ方 | 値の表（順番・行・level・index・値）と辞書の表（index・値・このページでの回数）を並べ、どちらも 100 件ずつページ送り。辞書は既定で「このページで使った値だけ」、切り替えで全件。index をクリックすると辞書の行を、辞書の値をクリックするとその index の値を強調する | 4 万件を超える辞書でも追加のライブラリなしで扱える。対応がクリック 1 回で分かる |
+| D58 | 対象にするページ | ボタンは辞書で符号化されたデータページ（RLE_DICTIONARY / PLAIN_DICTIONARY）と辞書ページに出す。辞書ページでは辞書の一覧だけを出す。途中から PLAIN に切り替わった（fallback）ページには「辞書を使っていない」と理由を添える。DATA_PAGE_V2 は level が圧縮されずにページ本体の先頭に置かれるので、その形に合わせて読む | 辞書が大きくなりすぎると writer は PLAIN に切り替える。それも Chunk の中の事実として見せる |
+| D59 | ページ本体の内訳 | ページの Inspector に、展開後の本体を「rep level / def level / index」に分けた帯を出す。区切り（RLE / Bit-Packing）をクリックすると、その区切りに当たる値を表で強調する | バイト列と値の対応が 1 画面で見える。Physical File Map は圧縮後のファイルの位置を表すので、展開後の内訳はそこに混ぜない |
+| D60 | 作る順番 | A. hybrid decoder とテスト（hyparquet と突き合わせ）→ B. ページ本体の読み込みと level・index・値への分解 → C. Inspector の UI（表・ページ送り・対応の強調・PLAIN との比較）→ D. ブラウザでの確認と design.md・issue 05 の更新。段階ごとに commit + push | 下の段階ほど UI から独立してテストできる |
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
@@ -431,3 +452,4 @@ cogp-inspector/
 - Phase 2（実装済み）: Column Chunk 詳細、Page、Dictionary、Page Index、Page bbox、Page pruning、Access Simulator、Range Request 可視化
 - Phase 3（実装済み・§3.4）: 実データ描画、progressive rendering、Expected vs Actual 比較、診断、比較用サンプルの生成と通常 GeoParquet との比較
 - GeoParquet 2.0（実装済み・§3.5）: 論理型の GEOMETRY / GEOGRAPHY、論理型の crs、geo の無いファイル、日付変更線をまたぐ bbox、2.0 の MUST の診断、2.0 版のサンプル
+- 辞書の値と index の表示（作業中・§3.6）: 辞書ページとデータページの本体を読み、RLE / Bit-Packing の区切り・level・index・辞書の値の対応と、PLAIN で書いた場合との差を見せる

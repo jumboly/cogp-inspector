@@ -12,4 +12,4 @@
 - RLE / Bit-Packing でエンコードされた index 列のデコードを自作するか
 
 ## 結論
-（未定）Phase 2 以降。
+design.md §3.6（D53〜D60）で方針を決定。ページの Inspector のボタンでそのページと辞書ページだけを読み、RLE / Bit-Packing の hybrid decoder を自作して区切り・level・index・辞書の値の対応を見せる。
