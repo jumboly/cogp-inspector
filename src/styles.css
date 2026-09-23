@@ -38,8 +38,8 @@ body {
 .app {
   display: grid;
   height: 100%;
-  grid-template-columns: 260px 1fr 320px;
-  grid-template-rows: auto 1fr 160px;
+  grid-template-columns: 280px 1fr 400px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     'header header header'
     'structure map inspector'
@@ -98,4 +98,419 @@ body {
 
 .muted {
   color: var(--muted);
+}
+
+/* ---- 共通部品 ---- */
+button {
+  font: inherit;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+}
+input[type='url'],
+select {
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+}
+a {
+  color: var(--accent);
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  flex: none;
+}
+.warn {
+  color: var(--danger);
+}
+
+:root {
+  --accent: #2563eb;
+  --danger: #c2410c;
+  --active: rgba(37, 99, 235, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #7aa2ff;
+    --danger: #fb923c;
+    --active: rgba(122, 162, 255, 0.18);
+  }
+}
+
+/* ---- ヘッダー ---- */
+.app-header {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.brand {
+  margin-right: 8px;
+}
+.url-form {
+  display: flex;
+  gap: 4px;
+}
+.url-form input {
+  width: 260px;
+}
+.header-status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+}
+.header-status > * {
+  flex: none;
+}
+.header-status > .ellipsis {
+  flex: 0 1 auto;
+  min-width: 60px;
+}
+.badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--muted);
+}
+.badge-cogp {
+  background: #1f9e89;
+}
+.error-banner {
+  position: absolute;
+  z-index: 2;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+/* ---- ツリー ---- */
+.tree,
+.tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tree ul {
+  padding-left: 14px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tree-row:hover {
+  background: var(--bg);
+}
+.tree-row.active {
+  background: var(--active);
+}
+.tree-toggle {
+  width: 12px;
+  color: var(--muted);
+  flex: none;
+}
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-meta {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---- Inspector ---- */
+.inspector {
+  overflow-x: auto;
+}
+.inspector h3 {
+  margin: 8px 0;
+  font-size: 15px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.inspector h4 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+.help {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  line-height: 1.55;
+}
+.layer {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+.layer-Parquet {
+  background: #56648a;
+}
+.layer-GeoParquet {
+  background: #0072b2;
+}
+.layer-COGP {
+  background: #1f9e89;
+}
+.layer-アクセス {
+  background: #ff5a36;
+}
+.overview dt {
+  margin-top: 10px;
+}
+.overview dd {
+  margin: 4px 0 0;
+  line-height: 1.55;
+}
+.kv {
+  margin: 0;
+}
+.kv-row {
+  display: grid;
+  grid-template-columns: 38% 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.kv dt {
+  color: var(--muted);
+  word-break: break-word;
+}
+.kv dd {
+  margin: 0;
+  word-break: break-word;
+}
+.kv-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.table th,
+.table td {
+  white-space: nowrap;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.table tr.clickable {
+  cursor: pointer;
+}
+.table tr.clickable:hover {
+  background: var(--bg);
+}
+.row-geometry td:first-child {
+  border-left: 3px solid #e69f00;
+}
+.row-covering td:first-child {
+  border-left: 3px solid #0072b2;
+}
+.row-error td {
+  color: var(--danger);
+}
+.role {
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.role-geometry {
+  border-color: #e69f00;
+}
+.role-covering {
+  border-color: #0072b2;
+}
+.problems {
+  margin: 6px 0;
+  padding-left: 18px;
+  color: var(--danger);
+}
+.raw {
+  margin-top: 10px;
+}
+.raw pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--bg);
+  font-size: 11px;
+}
+
+/* ---- prefix 図 ---- */
+.prefix {
+  margin: 4px 0 12px;
+}
+.prefix-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 30px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.prefix-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 12px;
+  margin: 2px 0;
+  cursor: pointer;
+}
+.prefix-row.active .prefix-track {
+  outline: 2px solid #ff2d95;
+}
+.prefix-label {
+  width: 24px;
+  font-size: 10px;
+  color: var(--muted);
+  text-align: right;
+}
+.prefix-track {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  background: var(--bg);
+}
+.prefix-old,
+.prefix-new {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.prefix-old {
+  opacity: 0.3;
+}
+/* Row Group 1 個分は 468 分の 1 で見えなくなるため、新規部分には最小幅を持たせる */
+.prefix-new {
+  min-width: 2px;
+}
+
+/* ---- 地図 ---- */
+.level-control {
+  position: absolute;
+  z-index: 1;
+  left: 10px;
+  top: 10px;
+  width: 340px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.level-control-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.level-control input[type='range'] {
+  width: 100%;
+}
+.level-legend {
+  display: flex;
+  height: 6px;
+  margin: 2px 0 4px;
+}
+.level-legend span {
+  flex: 1;
+}
+.map-notice {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* ---- Byte Map ---- */
+.bytemap-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.bytemap-bar button {
+  padding: 1px 8px;
+}
+.legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 3px 0 8px;
+  vertical-align: -1px;
+}
+.bytemap-info {
+  flex: 1;
+  min-width: 200px;
+  text-align: right;
+}
+.bytemap canvas {
+  display: block;
+  cursor: crosshair;
 }

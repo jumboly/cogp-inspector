@@ -25,6 +25,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # 公式サンプル（Git 管理外）を使うテストは自動でスキップされ、合成データの単体テストだけが走る
+      - run: npm test
       - run: npm run build
         env:
           GITHUB_PAGES: 'true'

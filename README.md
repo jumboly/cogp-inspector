@@ -42,16 +42,30 @@ HTTP Range Request で読めます。
 
 ## 開発ステータス
 
-**MVP 着手前。** 画面の枠組みと地図表示だけがある状態です（Parquet の読み込みは未実装）。
+**MVP 完了。** ファイルを開くと Footer だけを読み、Parquet・GeoParquet・COGP の構造を表示します。
+公開版: <https://www.jumboly.jp/cogp-inspector/>
 
 - [x] 仕様・既存実装・ライブラリの調査（[docs/design.md](docs/design.md)）
 - [x] 基本方針の決定
 - [x] 空のプロジェクト（Vite + React + TypeScript + MapLibre）と GitHub Pages への自動公開設定
-- [ ] MVP 実装（プロジェクト作成、ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
+- [x] MVP 実装（ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
 - [ ] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
 - [ ] Phase 3（実データ描画、比較、診断）
 
 未対応の課題は [docs/issues/](docs/issues/) に下書きし、GitHub Issue として管理します。
+
+## 使い方
+
+| 画面 | できること |
+|---|---|
+| ヘッダー | ローカルファイル / URL（HTTP Range Request）で開く。実際に読んだ回数とバイト数を表示（クリックで一覧） |
+| Structure（左） | ファイルの先頭 → 末尾の並びで構造をたどる。Schema・GeoParquet・COGP の情報が末尾の Footer の中にあることが階層で分かる |
+| 地図（中央） | Row Group の bbox を Level の色で描画。表示 Level を選ぶと、その Level で読む prefix（RG 0〜row_group_end）だけを表示し、その Level で増えた Row Group を太線で強調。クリックで Row Group を選択 |
+| Inspector（右） | 選んだ要素の詳細と、Parquet / GeoParquet / COGP のどの層の何なのかの解説 |
+| Physical File Map（下） | ファイル全体のバイト配置（Row Group・Column Chunk・Page Index・Footer）と、実際に読んだ範囲。ホイールで拡大、ドラッグで移動、クリックで選択 |
+
+初期処理で読むのは末尾 8 バイトと Footer だけです（公式サンプルでは 2 回・482KB、ファイルの 0.022%）。
+データ本体（Row Group）はまだ読みません。
 
 ## 起動方法
 
@@ -60,6 +74,7 @@ Node.js 20 以上が必要です。
 ```sh
 npm install
 npm run dev     # http://localhost:5173
+npm test        # 単体テスト（data/ に公式サンプルがあれば実データのテストも走る）
 npm run build   # 静的ファイルを dist/ に出力（main への push で GitHub Pages に自動公開）
 ```
 
@@ -75,6 +90,9 @@ ln /path/to/pois.cogp.parquet data/pois.cogp.parquet
 # 無い場合はダウンロード
 curl -o data/pois.cogp.parquet https://cogp-demo.spatialty.io/v1.0.0/pois.cogp.parquet
 ```
+
+開発サーバーでは、ヘッダーの「dev サンプル」ボタンで `data/pois.cogp.parquet` を URL（HTTP Range Request）として開けます。
+開発サーバーが `data/` を Range 付きで配信します（`vite.config.ts`）。
 
 公開版（GitHub Pages）からは、公式サンプルの配信サーバーの CORS 設定により URL で直接開けない見込みです。
 ダウンロードしたファイルを「ローカルファイルを開く」で読み込んでください（ファイル全体をメモリには読みません）。

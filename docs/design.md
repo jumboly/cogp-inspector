@@ -1,6 +1,6 @@
 # 設計メモ
 
-2026-09-23 時点の調査結果と決定事項。MVP の実装はまだ行っていない（画面の枠と地図表示のみ）。
+2026-09-23 時点の調査結果と決定事項。MVP は実装済み（§3.2 に実装時の判断を記録）。
 推測を含む箇所は【推測】と明記する。
 
 ## 1. 目的と設計の優先順位
@@ -133,7 +133,21 @@ inspect page index → select pages → read byte ranges → decode` の段階�
 - MapLibre v6 + Vite: `optimizeDeps.exclude: ['maplibre-gl']` と、`?worker&url` で worker をバンドルして `setWorkerUrl` に渡す対処が必要（src/ui/map/MapView.tsx）。
 - GitHub Pages の公開先は独自ドメイン https://www.jumboly.jp/cogp-inspector/（公式サンプルの CORS は不許可を確認済み）。
 
-## 4. アーキテクチャ案（MVP）
+### 3.2 MVP 実装時の判断（2026-09-23、「最後まで走る」指示のもとおすすめ案で決定）
+
+| # | 論点 | 決定 | 理由 |
+|---|---|---|---|
+| D5 | Footer の読み方 | hyparquet の `parquetMetadataAsync`（末尾 512KiB を一括）を使わず、末尾 8 バイト → Footer ちょうどの 2 回に分けて読み、`parquetMetadata` に渡す | Parquet の読み方そのものを Range 記録で見せるため。往復 1 回の増加は許容 |
+| D6 | メタデータの型 | `parquetMetadata(..., { geoparquet: false })` | hyparquet が geo から logical_type を補完するのを止め、ファイルに実際に書かれた Parquet の型を見せる |
+| D7 | 状態管理 | zustand。選択（Selection）を 1 つ持ち全ペインが購読する。選択の発生元（map / tree / bytemap / inspector）も持ち、地図以外で選んだときだけ地図を移動する | ペイン間の同期を 1 か所にまとめる |
+| D8 | Structure ツリーの並び | ファイルの物理順（先頭 magic → Row Group → Page Index → Footer → trailer）。Schema・geo・lod は Footer の子 | 「メタデータはすべて末尾の Footer にある」ことを階層で見せる |
+| D9 | 地図の重なり | 細かい Level ほど上に描く。クリック時は重なった bbox のうち面積最小の Row Group を選ぶ | 粗い Level の Row Group はほぼ全球を覆うため |
+| D10 | 表示 Level | 選んだ Level の prefix だけを表示し、その Level で増えた Row Group を太線、引き継いだ Row Group を細線にする。lod が仕様違反なら警告を出す | prefix 構造（前の Level を含んだまま増える）を地図上で見せる |
+| D11 | Physical File Map | canvas。構造・Column Chunk（列の役割で色分け）・読み込みの 3 段。最小描画幅 2px、Level 選択時は prefix の連続範囲を枠で示す | 2.2GB 中の Footer（0.02%）も見えるようにする |
+| D12 | バイナリ列の統計 | BYTE_ARRAY で文字列系の論理型でない列（WKB など）は min/max を `<バイナリ N bytes>` と表示 | hyparquet は文字列化して返すため文字化けする |
+| D13 | 開発サーバー | `data/` を Range 付きで配信する Vite プラグイン。Range なしは 416 | URL で開く経路を手元で再現する。2.2GB を public/ に置くとビルドにコピーされるため |
+
+## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
 UI (React)   Tree / Map / Inspector / ByteMap が「選択状態」を 1 つ共有して同期
