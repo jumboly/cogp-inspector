@@ -6,6 +6,7 @@ import { TracedSource } from '../io/traced'
 import { inspect, type Inspection } from '../inspect'
 import { pageBboxesFromCache, pageBboxIndexWants, type PageBboxes } from '../geo/pageBbox'
 import { PageCache, type ChunkPages } from '../parquet/pages'
+import { defaultColumns, planAccess, type AccessPlan, type PlanInput } from '../plan/accessPlan'
 
 /**
  * Tree / Map / Inspector / ByteMap が共有する「いま何を見ているか」。
@@ -27,11 +28,28 @@ export type Selection =
   | { kind: 'page'; rg: number; col: number; page: number }
   | { kind: 'pageIndex' }
   | { kind: 'reads' }
+  | { kind: 'plan' }
 
 /** 選択の発生元。地図以外で選んだときだけ地図をその場所へ動かす */
 export type SelectOrigin = 'map' | 'tree' | 'bytemap' | 'inspector'
 
 export type Loadable<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'error'; error: string }
+
+/** Access Plan の funnel のどの段を見ているか。地図と Physical File Map の強調に使う */
+export type PlanStage = 'prefix' | 'rowGroupPruned' | 'pages' | 'requests'
+
+export interface SimulatorState {
+  enabled: boolean
+  columns: number[]
+  status: 'idle' | 'running' | 'ready' | 'error'
+  plan?: AccessPlan
+  error?: string
+  focus: PlanStage
+  /** 最後に計算した表示範囲と縮尺。列を変えたときに同じ範囲で計算し直すため */
+  lastView?: Omit<PlanInput, 'columns'>
+}
+
+const SIM_OFF: SimulatorState = { enabled: false, columns: [], status: 'idle', focus: 'requests' }
 
 export const chunkKey = (rg: number, col: number) => `${rg}:${col}`
 
@@ -50,6 +68,7 @@ interface State {
   /** Inspector の Page bbox 一覧でホバー中の行範囲（地図で強調する） */
   hoverSpan: { rg: number; span: number } | null
   reads: ReadRecord[]
+  simulator: SimulatorState
   selection: Selection | null
   selectOrigin?: SelectOrigin
   /** 地図に表示する Level（null = すべての Row Group を表示） */
@@ -62,7 +81,15 @@ interface State {
   loadChunkPages: (rg: number, col: number) => void
   loadPageBboxes: (rg: number) => void
   setHoverSpan: (h: { rg: number; span: number } | null) => void
+  setSimulatorEnabled: (enabled: boolean) => void
+  setSimulatorColumns: (columns: number[]) => void
+  setPlanFocus: (focus: PlanStage) => void
+  /** 地図から呼ぶ。表示範囲と縮尺が変わるたびに Access Plan を計算し直す */
+  runSimulation: (view: Omit<PlanInput, 'columns'>) => void
 }
+
+// 地図を続けて動かしたとき、古い計算の結果で新しい結果を上書きしないための通し番号
+let simToken = 0
 
 export const useStore = create<State>((set, get) => ({
   status: 'idle',
@@ -70,12 +97,13 @@ export const useStore = create<State>((set, get) => ({
   chunkPages: {},
   pageBboxes: {},
   hoverSpan: null,
+  simulator: SIM_OFF,
   selection: null,
   viewLevel: null,
   hoverRowGroup: null,
 
   async open(openSource) {
-    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], selection: null, viewLevel: null, hoverRowGroup: null })
+    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], simulator: SIM_OFF, selection: null, viewLevel: null, hoverRowGroup: null })
     try {
       const raw = await openSource()
       set({ sourceName: raw.name, sourceKind: raw.kind })
@@ -91,11 +119,13 @@ export const useStore = create<State>((set, get) => ({
   select(selection, origin) {
     // Row Group を選んだら、その Row Group が属する Level も地図上で分かるよう表示 Level を合わせる
     const patch: Partial<State> = { selection, selectOrigin: origin }
-    if (selection?.kind === 'level') patch.viewLevel = selection.level
+    // Simulator の間は表示 Level を Simulator が決めるので、選択では変えない（design.md D19）
+    const manualLevel = !get().simulator.enabled
+    if (manualLevel && selection?.kind === 'level') patch.viewLevel = selection.level
     if (selection?.kind === 'column' || selection?.kind === 'page') get().loadChunkPages(selection.rg, selection.col)
     // Row Group の中のものを選んだら、その Row Group のページの空間範囲も読む（design.md D15）
     if (selection?.kind === 'rowGroup' || selection?.kind === 'column' || selection?.kind === 'page') get().loadPageBboxes(selection.rg)
-    if (selection?.kind === 'rowGroup') {
+    if (manualLevel && selection?.kind === 'rowGroup') {
       const view = get().viewLevel
       const lod = get().inspection?.lod
       const lv = levelOfRowGroup(lod, selection.rg)
@@ -103,7 +133,9 @@ export const useStore = create<State>((set, get) => ({
     }
     set(patch)
   },
-  setViewLevel: (viewLevel) => set({ viewLevel }),
+  setViewLevel: (viewLevel) => {
+    if (!get().simulator.enabled) set({ viewLevel })
+  },
   setHoverRowGroup: (hoverRowGroup) => set({ hoverRowGroup }),
 
   loadChunkPages(rg, col) {
@@ -136,4 +168,43 @@ export const useStore = create<State>((set, get) => ({
     )
   },
   setHoverSpan: (hoverSpan) => set({ hoverSpan }),
+
+  setSimulatorEnabled(enabled) {
+    const { inspection, simulator } = get()
+    if (!inspection) return
+    if (!enabled) {
+      set({ simulator: { ...SIM_OFF, columns: simulator.columns }, viewLevel: null, selection: get().selection?.kind === 'plan' ? { kind: 'file' } : get().selection })
+      return
+    }
+    // 計算は地図が表示範囲を渡したとき（runSimulation）に始まる
+    set({
+      simulator: { ...SIM_OFF, enabled: true, columns: simulator.columns.length ? simulator.columns : defaultColumns(inspection) },
+      selection: { kind: 'plan' },
+      selectOrigin: 'inspector',
+    })
+  },
+  setSimulatorColumns(columns) {
+    set({ simulator: { ...get().simulator, columns } })
+    const last = get().simulator.lastView
+    if (last) get().runSimulation(last)
+  },
+  setPlanFocus: (focus) => set({ simulator: { ...get().simulator, focus } }),
+
+  runSimulation(view) {
+    const { inspection, pageCache, simulator } = get()
+    if (!inspection || !pageCache || !simulator.enabled) return
+    const token = ++simToken
+    set({ simulator: { ...simulator, status: 'running', lastView: view } })
+    planAccess(inspection, pageCache, { ...view, columns: simulator.columns }).then(
+      (plan) => {
+        if (token !== simToken || !get().simulator.enabled) return
+        // Simulator の間は、選ばれた Level の prefix を地図に表示する（手動の Level 選択は無効：design.md D19）
+        set({ simulator: { ...get().simulator, status: 'ready', plan, error: undefined }, viewLevel: plan.level.used ? (plan.level.level?.level ?? null) : null })
+      },
+      (e) => {
+        if (token !== simToken) return
+        set({ simulator: { ...get().simulator, status: 'error', error: (e as Error).message } })
+      },
+    )
+  },
 }))

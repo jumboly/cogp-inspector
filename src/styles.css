@@ -514,3 +514,85 @@ a {
   display: block;
   cursor: crosshair;
 }
+
+/* ---- Phase 2: Page・Access Simulator ---- */
+.tree-note {
+  padding: 2px 0 2px 36px;
+  font-size: 12px;
+}
+.dict-box {
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-left: 3px solid #8e6c8a;
+  background: var(--bg);
+  font-size: 12px;
+}
+.sim-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.sim-row label {
+  font-weight: 600;
+}
+.sim-row button {
+  margin-left: auto;
+}
+.col-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+/* 列の役割は ByteMap・Row Group の表と同じ色の縦線で示す */
+.col-geometry {
+  border-left: 3px solid #e69f00;
+  padding-left: 3px;
+}
+.col-covering {
+  border-left: 3px solid #0072b2;
+  padding-left: 3px;
+}
+.col-attribute {
+  border-left: 3px solid #9a9aa6;
+  padding-left: 3px;
+}
+.funnel td {
+  white-space: normal;
+}
+.funnel tr.clickable td,
+.funnel tr:not(.funnel-note) td {
+  border-bottom: none;
+  padding-top: 6px;
+}
+.funnel tr.active td {
+  background: rgba(0, 158, 115, 0.12);
+}
+.funnel-note td {
+  color: var(--muted);
+  font-size: 11px;
+  padding-top: 0;
+}
+/* 再計算中は古い結果だと分かるよう薄くする */
+.funnel.stale {
+  opacity: 0.5;
+}
+.funnel-bar {
+  display: block;
+  height: 4px;
+  margin: 2px 0;
+  background: var(--bg);
+}
+.funnel-bar span {
+  display: block;
+  height: 100%;
+  background: #009e73;
+}

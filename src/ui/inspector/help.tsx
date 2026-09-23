@@ -15,6 +15,7 @@ export const HELP: Partial<Record<Selection['kind'], { layer: 'Parquet' | 'GeoPa
   geo: { layer: 'GeoParquet', text: 'GeoParquet は Parquet の key-value メタデータ "geo" に、ジオメトリ列・CRS・bbox covering などの情報を JSON で書く仕様です。' },
   lod: { layer: 'COGP', text: 'COGP は geo メタデータに lod.levels を足し、Row Group を粗い順に並べます。Level N は RG 0 から row_group_end までの先頭部分（prefix）を読むだけで、その解像度に必要な地物がそろいます。' },
   level: { layer: 'COGP', text: 'この Level を表示するには、RG 0 から row_group_end までを読みます。前の Level の Row Group に、この Level の Row Group を足した範囲です。' },
+  plan: { layer: 'アクセス', text: '地図の表示範囲と縮尺から、リーダーがどこを読むかを推定します。Level で候補を先頭の一部に絞り、Row Group とページの bbox で表示範囲外を読み飛ばし、残ったページを Range Request にまとめます。' },
   reads: { layer: 'アクセス', text: 'ファイルを開いてから実際に読んだバイト範囲の記録です。URL の場合はそれぞれが 1 回の HTTP Range Request です。' },
 }
 

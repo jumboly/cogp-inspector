@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+import { viewportBoxes } from '../../plan/viewport'
 import { useStore } from '../../state/store'
 import { SELECT_COLOR } from '../../util/color'
 import { LevelControl } from './LevelControl'
@@ -32,6 +33,18 @@ const SPAN_SRC = 'page-spans'
 const SPAN_COLOR = '#0072b2'
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
+/**
+ * 表示の縮尺を「1 CSS ピクセルあたりのデータの座標単位」で求める。
+ * cogp-js デモと同じく、地図の縦中央で横 100 CSS px 離れた 2 点の座標差を使う（design.md D18）。
+ */
+function targetResolution(map: maplibregl.Map, proj: 'lonlat' | 'webmercator' | null): number {
+  const y = map.getContainer().clientHeight / 2
+  const a = map.unproject([0, y])
+  const b = map.unproject([100, y])
+  const dx = proj === 'webmercator' ? ((b.lng - a.lng) * Math.PI * 6378137) / 180 : b.lng - a.lng
+  return Math.abs(dx) / 100
+}
+
 export function MapView() {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -43,6 +56,9 @@ export function MapView() {
   const hover = useStore((s) => s.hoverRowGroup)
   const pageBboxes = useStore((s) => s.pageBboxes)
   const hoverSpan = useStore((s) => s.hoverSpan)
+  const simEnabled = useStore((s) => s.simulator.enabled)
+  const plan = useStore((s) => s.simulator.plan)
+  const focus = useStore((s) => s.simulator.focus)
 
   useEffect(() => {
     if (!container.current) return
@@ -56,7 +72,7 @@ export function MapView() {
       map.addLayer({ id: 'rg-hover', type: 'line', source: SRC, filter: ['==', ['get', 'rg'], -1], paint: { 'line-color': SELECT_COLOR, 'line-width': 2, 'line-dasharray': [2, 1] } })
       map.addLayer({ id: 'rg-selected', type: 'line', source: SRC, filter: ['==', ['get', 'rg'], -1], paint: { 'line-color': SELECT_COLOR, 'line-width': 3 } })
       map.addSource(SPAN_SRC, { type: 'geojson', data: EMPTY })
-      map.addLayer({ id: 'span-fill', type: 'fill', source: SPAN_SRC, paint: { 'fill-color': SPAN_COLOR, 'fill-opacity': ['case', ['get', 'kept'], 0.12, 0.02] } })
+      map.addLayer({ id: 'span-fill', type: 'fill', source: SPAN_SRC, paint: { 'fill-color': SPAN_COLOR, 'fill-opacity': ['case', ['get', 'kept'], 0.03, 0] } })
       map.addLayer({ id: 'span-line', type: 'line', source: SPAN_SRC, paint: { 'line-color': SPAN_COLOR, 'line-width': 1, 'line-opacity': ['case', ['get', 'kept'], 0.9, 0.25] } })
       map.addLayer({ id: 'span-hover', type: 'line', source: SPAN_SRC, filter: ['==', ['get', 'span'], -1], paint: { 'line-color': SELECT_COLOR, 'line-width': 2.5 } })
       setLoaded(true)
@@ -100,7 +116,8 @@ export function MapView() {
     if (u) map.fitBounds([[u[0], Math.max(u[1], -80)], [u[2], Math.min(u[3], 80)]], { padding: 40, duration: 0 })
   }, [inspection, loaded])
 
-  // 表示 Level: その Level で読む prefix（RG 0..row_group_end）だけを表示し、この Level で増えた Row Group を強調する
+  // 表示 Level: その Level で読む prefix（RG 0..row_group_end）だけを表示し、この Level で増えた Row Group を強調する。
+  // Simulator の間（Level の段階を見ているとき以外）は、Row Group の bbox で残したものを濃く、読み飛ばしたものを薄く描く
   useEffect(() => {
     const map = mapRef.current
     if (!map || !loaded) return
@@ -108,11 +125,19 @@ export function MapView() {
     const filter: maplibregl.FilterSpecification | null = end === undefined ? null : ['<=', ['get', 'rg'], end]
     map.setFilter('rg-fill', filter)
     map.setFilter('rg-line', filter)
+    if (simEnabled && plan && focus !== 'prefix') {
+      const kept: maplibregl.ExpressionSpecification = ['in', ['get', 'rg'], ['literal', plan.rowGroups.map((r) => r.rg)]]
+      map.setPaintProperty('rg-line', 'line-width', ['case', kept, 2, 0.5])
+      map.setPaintProperty('rg-line', 'line-opacity', ['case', kept, 1, 0.2])
+      // 粗い Level の Row Group はほぼ全球を覆って重なるので、塗りはごく薄くする
+      map.setPaintProperty('rg-fill', 'fill-opacity', ['case', kept, focus === 'rowGroupPruned' ? 0.06 : 0.02, 0])
+      return
+    }
     const isNew: maplibregl.ExpressionSpecification = ['==', ['get', 'level'], viewLevel ?? -2]
     map.setPaintProperty('rg-line', 'line-width', viewLevel === null ? 1 : ['case', isNew, 2, 0.7])
     map.setPaintProperty('rg-line', 'line-opacity', viewLevel === null ? 1 : ['case', isNew, 1, 0.35])
     map.setPaintProperty('rg-fill', 'fill-opacity', viewLevel === null ? 0.03 : ['case', isNew, 0.18, 0.03])
-  }, [viewLevel, inspection, loaded])
+  }, [viewLevel, inspection, loaded, simEnabled, plan, focus])
 
   useEffect(() => {
     const map = mapRef.current
@@ -135,13 +160,54 @@ export function MapView() {
   // 選択中の Row Group のページ単位の bbox（Page Index から求めたもの）
   const selRg = selection?.kind === 'rowGroup' || selection?.kind === 'column' || selection?.kind === 'page' ? selection.rg : undefined
   const selSpans = selRg === undefined ? undefined : pageBboxes[selRg]
+  // Simulator の間は、候補に残った Row Group のページを「読む / 読み飛ばす」で塗り分ける
   useEffect(() => {
     const map = mapRef.current
     if (!map || !loaded) return
     const src = map.getSource(SPAN_SRC) as maplibregl.GeoJSONSource
-    const ready = inspection && selRg !== undefined && selSpans?.status === 'ready' && selSpans.data.available ? selSpans.data : undefined
-    src.setData(ready ? spanFeatures(inspection!, [{ rg: selRg!, spans: ready.spans }]) : EMPTY)
-  }, [inspection, selRg, selSpans, loaded])
+    if (!inspection) {
+      src.setData(EMPTY)
+      return
+    }
+    if (simEnabled) {
+      const show = plan && (focus === 'pages' || focus === 'requests')
+      src.setData(
+        show
+          ? spanFeatures(
+              inspection,
+              plan.rowGroups.flatMap((r) => (r.pageBboxes?.available ? [{ rg: r.rg, spans: r.pageBboxes.spans, kept: (i: number) => r.spanKept?.[i] ?? true }] : [])),
+            )
+          : EMPTY,
+      )
+      return
+    }
+    const ready = selRg !== undefined && selSpans?.status === 'ready' && selSpans.data.available ? selSpans.data : undefined
+    src.setData(ready ? spanFeatures(inspection, [{ rg: selRg!, spans: ready.spans }]) : EMPTY)
+  }, [inspection, selRg, selSpans, loaded, simEnabled, plan, focus])
+
+  // Simulator: 地図の移動が止まるたびに、表示範囲と縮尺から Access Plan を計算し直す（design.md D19）
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !loaded || !simEnabled || !inspection) return
+    const proj = inspection.geo?.primary?.crs.mapProjection ?? null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const run = () => {
+      const b = map.getBounds()
+      useStore.getState().runSimulation({ viewport: viewportBoxes(b.getWest(), b.getSouth(), b.getEast(), b.getNorth(), proj), targetResolution: targetResolution(map, proj) })
+    }
+    // 続けて動かしている間は計算しない（止まってから 250ms 後に 1 回）
+    const onMove = () => {
+      clearTimeout(timer)
+      timer = setTimeout(run, 250)
+    }
+    run()
+    map.on('moveend', onMove)
+    return () => {
+      clearTimeout(timer)
+      map.off('moveend', onMove)
+    }
+  }, [loaded, simEnabled, inspection])
+
 
   useEffect(() => {
     const map = mapRef.current
@@ -155,7 +221,7 @@ export function MapView() {
   return (
     <>
       <div ref={container} className="map" />
-      {inspection?.lod && <LevelControl />}
+      {inspection?.geo?.primary?.crs.mapProjection && <LevelControl />}
       {(unmappable || noBbox) && (
         <div className="map-notice">
           {!inspection.geo

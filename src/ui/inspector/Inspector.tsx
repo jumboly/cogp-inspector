@@ -8,6 +8,7 @@ import { KV, RawJson } from '../common/KV'
 import { columnRole, ROLE_LABEL } from './columnRole'
 import { Help, Overview } from './help'
 import { LevelPrefix } from './LevelPrefix'
+import { AccessPlanView } from './AccessPlanView'
 import { PageBboxSection } from './PageBboxView'
 import { ChunkPagesSection, PageView } from './PagesView'
 
@@ -154,6 +155,8 @@ function Body({ sel, ins }: { sel: Selection; ins: Inspection }) {
     }
     case 'reads':
       return <ReadsView />
+    case 'plan':
+      return <AccessPlanView ins={ins} />
   }
 }
 

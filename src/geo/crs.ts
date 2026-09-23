@@ -67,3 +67,12 @@ export function mercatorToLonLat(x: number, y: number): [number, number] {
   const lat = (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * (180 / Math.PI)
   return [lon, lat]
 }
+
+// Web メルカトルは緯度 ±85.0511° までしか表せない（それ以上は y が発散する）
+const MAX_MERCATOR_LAT = 85.0511287798
+
+/** 経度・緯度を EPSG:3857 のメートル座標に変換する（地図の表示範囲を 3857 のデータと比べるため） */
+export function lonLatToMercator(lon: number, lat: number): [number, number] {
+  const phi = (Math.max(-MAX_MERCATOR_LAT, Math.min(MAX_MERCATOR_LAT, lat)) * Math.PI) / 180
+  return [(lon * Math.PI * R) / 180, R * Math.log(Math.tan(Math.PI / 4 + phi / 2))]
+}

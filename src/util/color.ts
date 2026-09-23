@@ -22,3 +22,5 @@ export function levelColor(level: number, count: number): string {
 export const NEUTRAL = '#7a7a8c'
 export const READ_COLOR = '#ff5a36'
 export const SELECT_COLOR = '#ff2d95'
+/** Access Simulator が推定した「読む予定」の範囲（実際に読んだ範囲の色と区別する） */
+export const PLAN_COLOR = '#009e73'

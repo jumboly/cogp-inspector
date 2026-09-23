@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Inspection } from '../../inspect'
 import type { ByteRange } from '../../parquet/model'
-import { useStore } from '../../state/store'
-import { READ_COLOR, SELECT_COLOR } from '../../util/color'
+import type { AccessPlan } from '../../plan/accessPlan'
+import { useStore, type PlanStage } from '../../state/store'
+import { PLAN_COLOR, READ_COLOR, SELECT_COLOR } from '../../util/color'
 import { formatBytes, formatNumber } from '../../util/format'
 import { buildSegments, DICT_COLOR, pageSegments, ROLE_COLOR, selectionRange, type Segment } from './segments'
 
@@ -11,6 +12,7 @@ const LANES = [
   { key: 'structure', label: '構造', h: 26 },
   { key: 'chunk', label: 'Column Chunk', h: 14 },
   { key: 'page', label: 'Page', h: 14 },
+  { key: 'plan', label: '読む予定', h: 14 },
   { key: 'reads', label: '読み込み', h: 14 },
 ] as const
 const LABEL_W = 92
@@ -19,6 +21,25 @@ const HEIGHT = AXIS_H + LANES.reduce((a, l) => a + l.h + GAP, 0)
 // 2.2GB 中の Footer（0.5MB）は等倍では 1px 未満になる。存在が見えるよう最小幅を持たせる
 const MIN_PX = 2
 const MIN_SPAN = 64
+
+/**
+ * Access Plan の funnel で選んだ段階に応じた「読む予定」の範囲。
+ * Level・Row Group の段階では Column Chunk 単位、ページ以降はページ（合体後の Range）単位で示す。
+ */
+function plannedRanges(ins: Inspection, plan: AccessPlan | undefined, focus: PlanStage): { ranges: ByteRange[]; label: string } | undefined {
+  if (!plan) return undefined
+  const cols = new Set(plan.input.columns)
+  const chunksOf = (rgs: number[]) => rgs.flatMap((rg) => ins.file.rowGroups[rg].columns.filter((c) => cols.has(c.column.index)).map((c) => c.range))
+  if (focus === 'prefix') {
+    const end = plan.stages.prefix.rowGroups
+    return { ranges: chunksOf([...Array(end).keys()]), label: 'Level の prefix・選んだ列の Column Chunk' }
+  }
+  if (focus === 'rowGroupPruned') return { ranges: chunksOf(plan.rowGroups.map((r) => r.rg)), label: 'Row Group の bbox で残った・選んだ列の Column Chunk' }
+  if (focus === 'pages') {
+    return { ranges: plan.rowGroups.flatMap((r) => r.chunkRanges.filter((c) => cols.has(c.col)).flatMap((c) => c.ranges)), label: 'Page bbox で残ったページ' }
+  }
+  return { ranges: plan.requests, label: '合体後の Range Request' }
+}
 
 function laneTop(i: number) {
   return AXIS_H + LANES.slice(0, i).reduce((a, l) => a + l.h + GAP, 0)
@@ -60,11 +81,13 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
   const select = useStore((s) => s.select)
   const hoverRg = useStore((s) => s.hoverRowGroup)
   const chunkPages = useStore((s) => s.chunkPages)
+  const sim = useStore((s) => s.simulator)
+  const planned = useMemo(() => plannedRanges(ins, sim.enabled ? sim.plan : undefined, sim.focus), [ins, sim.enabled, sim.plan, sim.focus])
   const canvas = useRef<HTMLCanvasElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(800)
   const [view, setView] = useState<View>({ start: 0, end: ins.file.size })
-  const [hover, setHover] = useState<Segment | { label: string; range: ByteRange } | null>(null)
+  const [hover, setHover] = useState<Pick<Segment, 'label' | 'range' | 'sel'> | null>(null)
   const drag = useRef<{ x: number; view: View; moved: boolean } | null>(null)
   const baseSegments = useMemo(() => buildSegments(ins), [ins])
   const segments = useMemo(() => [...baseSegments, ...pageSegments(ins, chunkPages)], [baseSegments, ins, chunkPages])
@@ -125,7 +148,19 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
       g.beginPath()
       g.rect(LABEL_W, y, plotW, lane.h)
       g.clip()
-      if (lane.key === 'page' && !segments.some((s) => s.lane === 'page')) {
+      if (lane.key === 'plan') {
+        if (!planned) {
+          g.fillStyle = muted
+          g.fillText('Access Simulator を ON にすると、表示範囲から推定した読む範囲を表示します', LABEL_W + 6, y + lane.h / 2)
+        } else {
+          g.fillStyle = PLAN_COLOR
+          for (const r of planned.ranges) {
+            if (r.end < view.start || r.start > view.end) continue
+            const { x, w } = rect(r)
+            g.fillRect(x, y, w, lane.h)
+          }
+        }
+      } else if (lane.key === 'page' && !segments.some((s) => s.lane === 'page')) {
         g.fillStyle = muted
         g.fillText('Column Chunk を選ぶと、その Chunk のページを読んで表示します', LABEL_W + 6, y + lane.h / 2)
       } else if (lane.key === 'reads') {
@@ -167,18 +202,25 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
     if (hoverRg !== null) outline(ins.file.rowGroups[hoverRg].range, SELECT_COLOR, [3, 2])
     if (selRange) outline(selRange, SELECT_COLOR, [])
     g.fillStyle = text
-  }, [width, view, segments, reads, selRange, hoverRg, ins, plotW])
+  }, [width, view, segments, reads, selRange, hoverRg, ins, plotW, planned])
 
   const hitTest = (x: number, y: number) => {
     const laneIdx = LANES.findIndex((_, i) => y >= laneTop(i) && y < laneTop(i) + LANES[i].h)
     if (laneIdx < 0 || x < LABEL_W) return null
     const lane = LANES[laneIdx].key
+    if (lane === 'plan') {
+      const r = planned?.ranges.find((r) => {
+        const { x: rx, w } = rect(r)
+        return x >= rx && x <= rx + w
+      })
+      return r ? { label: `読む予定（${planned!.label}）`, range: r, sel: { kind: 'plan' } as const } : null
+    }
     if (lane === 'reads') {
       const r = [...reads].reverse().find((r) => {
         const { x: rx, w } = rect({ start: r.offset, end: r.offset + r.length })
         return x >= rx && x <= rx + w
       })
-      return r ? { label: `読み込み #${r.id}: ${r.purpose}`, range: { start: r.offset, end: r.offset + r.length } } : null
+      return r ? { label: `読み込み #${r.id}: ${r.purpose}`, range: { start: r.offset, end: r.offset + r.length }, sel: { kind: 'reads' } as const } : null
     }
     // 最小幅で広げて描いた領域も拾えるよう、描画と同じ矩形で判定する（後に描いたものが上）
     for (let i = segments.length - 1; i >= 0; i--) {
@@ -231,7 +273,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
         </button>
         <button onClick={() => zoomTo({ start: ins.file.pageIndex?.start ?? ins.file.footer.start, end: ins.file.size }, 0.05)}>末尾（Footer 周辺）へ</button>
         <span className="legend">
-          <i style={{ background: ROLE_COLOR.geometry }} /> geometry <i style={{ background: ROLE_COLOR.covering }} /> bbox covering <i style={{ background: ROLE_COLOR.attribute }} /> 属性 <i style={{ background: DICT_COLOR }} /> 辞書ページ <i style={{ background: READ_COLOR }} /> 読んだ範囲
+          <i style={{ background: ROLE_COLOR.geometry }} /> geometry <i style={{ background: ROLE_COLOR.covering }} /> bbox covering <i style={{ background: ROLE_COLOR.attribute }} /> 属性 <i style={{ background: DICT_COLOR }} /> 辞書ページ <i style={{ background: PLAN_COLOR }} /> 読む予定 <i style={{ background: READ_COLOR }} /> 読んだ範囲
         </span>
         <span className="muted bytemap-info">
           {hover
@@ -266,8 +308,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
           drag.current = null
           if (d?.moved) return
           const hit = hitTest(e.nativeEvent.offsetX, e.nativeEvent.offsetY)
-          if (hit && 'sel' in hit) select(hit.sel, 'bytemap')
-          else if (hit) select({ kind: 'reads' }, 'bytemap')
+          if (hit) select(hit.sel, 'bytemap')
         }}
         onDoubleClick={(e) => {
           const at = toByte(e.nativeEvent.offsetX)

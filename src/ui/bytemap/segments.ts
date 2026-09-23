@@ -101,6 +101,8 @@ export function selectionRange(ins: Inspection, sel: Selection | null, chunkPage
       return file.headerMagic
     case 'pageIndex':
       return file.pageIndex
+    case 'plan':
+      return undefined
     case 'level': {
       const end = lod?.levels[sel.level]?.rowGroupEnd
       if (end === undefined || !file.rowGroups.length) return undefined

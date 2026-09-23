@@ -162,6 +162,12 @@ D14〜D22 はユーザーと 1 問ずつ議論して決定。D23 以降は「以
 | D20 | 結果の見せ方 | Inspector の「Access Plan」に段階ごとの funnel（候補数とバイト数）。段階をクリックすると地図と Physical File Map が連動 | 既存の Selection の同期（D7）に乗せられ、新しいペインが要らない |
 | D21 | 読む列 | 列を選べる（既定は geometry + bbox covering 列）。全列を読んだ場合との差も表示 | 列指向の利点がバイト数の差として直接見える |
 | D22 | Range の合体 | cogp-js と同じく、重なり・隣接だけ合体し隙間は埋めない。合体前後の数を表示。Index の実際の読み込みも同じ方針で合体する | 参照実装と同じ数値になり、空間順の並びがリクエスト数を減らす効果が見える |
+| D23 | Simulator が実際に読むもの | Page Index だけを実際に読み、データページは読まずに範囲を推定する（decode は Phase 3） | 「Index を読んで、読む範囲を決める」までが Phase 2 の範囲。推定（Expected）と実測（Actual）を分けておくと Phase 3 で比較できる |
+| D24 | 全列との比較の求め方 | 候補 Row Group の全列の OffsetIndex を読み、全列でもページ単位で求める | Row Group 単位の概算だと、選んだ列とページ単位で比べられない。parquet-rs では 1 Row Group 分の OffsetIndex が隣接し、1 回の read で済む |
+| D25 | Page Index を読む上限 | 候補 Row Group が 100 個を超えたら Page Index を読まず、ページ単位の絞り込みを省く（その旨を funnel に表示） | lod の無いファイルを全体表示すると数百回の Range Request になるため。COGP なら Level 選択で候補が抑えられる |
+| D26 | 表示範囲の扱い | 世界を横に繰り返した経度を -180〜180 に戻し、日付変更線をまたぐときは bbox を 2 つに分ける。3857 のファイルは表示範囲をメートルに変換して比べる | 1 つの bbox で表すと、またいだ側の反対の地域まで含んでしまう |
+| D27 | Simulator の地図表示 | Row Group は「残った = 太線、読み飛ばし = 細線」、ページは「読む = 青の枠、読み飛ばし = 薄い枠」。地図の移動が止まって 250ms 後に計算する | 粗い Level の Row Group・ページはほぼ全球を覆って重なるので、塗りはごく薄くし線で見分ける |
+| D28 | Physical File Map の「読む予定」 | 新しい段「読む予定」を追加。funnel で選んだ段に応じ、Level・Row Group の段では Column Chunk 単位、ページ以降はページ（合体後の Range）単位で描く | 同じファイル上で、段を進めるごとに読む範囲が細かくなる様子を見せる |
 
 実装メモ（段階 A）:
 
@@ -178,6 +184,13 @@ D14〜D22 はユーザーと 1 問ずつ議論して決定。D23 以降は「以
 - 公式サンプルの RG300 は 32 の行範囲（2,048 行ずつ）で、4 列のページ境界はそろっている（D17 の【推測】どおり）。
 - 値がすべて null のページや、min/max が数値でないページは bbox 不明として扱い、読み飛ばさない。
 
+実装メモ（段階 C）:
+
+- 公式サンプルで東京周辺（139.6〜139.9°E, 35.6〜35.8°N、目標 0.0003°/px）を計算すると、
+  Level 10 → prefix 188 RG → bbox で 11 RG → 292 範囲中 32 範囲 → 選んだ 5 列で約 2.7MB（Row Group 単位なら 25MB）、
+  160 ページ範囲が合体して 95 回の Range Request。Page Index の読み込みは 16 回（132 件を合体）。
+- 地図を続けて動かしたときは通し番号で古い計算結果を捨てる。列を変えたら最後の表示範囲で計算し直す。
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
@@ -187,7 +200,7 @@ Model 層（純粋関数・UI 非依存）
    parquet/  footer 解析 → FileModel（RG, ColumnChunk, byte 範囲）
    geo/      geo メタデータ → GeoModel（CRS, covering, bbox）
    cogp/     lod の検証・Level → RG の prefix
-   plan/     viewport → AccessPlan（Phase 2 の Access Simulator = Expected）
+   plan/     viewport → AccessPlan（Phase 2 の Access Simulator = Expected。段階ごとの中間結果を返す）
    ↑
 IO 層
    RandomAccessSource { size(), read(offset, length, purpose) }

@@ -26,6 +26,9 @@ export function coalesce<T>(items: T[], rangeOf: (t: T) => ByteRange): Run<T>[] 
   return runs
 }
 
+// ブラウザの同一ホストへの同時接続数（HTTP/1.1 で 6）に合わせる
+const READ_CONCURRENCY = 6
+
 export interface RangeRequest {
   range: ByteRange
   purpose: string
@@ -41,13 +44,11 @@ export async function readCoalesced(source: RandomAccessSource, requests: RangeR
     (r) => r.range,
   )
   const out: ArrayBuffer[] = new Array(requests.length)
-  await Promise.all(
-    runs.map(async (run) => {
-      const purpose = run.members.length === 1 ? run.members[0].purpose : `${run.members[0].purpose} ほか ${run.members.length - 1} 件（合体）`
-      const buf = await source.read(run.range.start, run.range.end - run.range.start, purpose)
-      for (const m of run.members) out[m.i] = buf.slice(m.range.start - run.range.start, m.range.end - run.range.start)
-    }),
-  )
+  await mapLimit(runs, READ_CONCURRENCY, async (run) => {
+    const purpose = run.members.length === 1 ? run.members[0].purpose : `${run.members[0].purpose} ほか ${run.members.length - 1} 件（合体）`
+    const buf = await source.read(run.range.start, run.range.end - run.range.start, purpose)
+    for (const m of run.members) out[m.i] = buf.slice(m.range.start - run.range.start, m.range.end - run.range.start)
+  })
   return out
 }
 
