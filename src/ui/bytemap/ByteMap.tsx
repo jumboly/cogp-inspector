@@ -91,7 +91,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
   const drag = useRef<{ x: number; view: View; moved: boolean } | null>(null)
   const baseSegments = useMemo(() => buildSegments(ins), [ins])
   const segments = useMemo(() => [...baseSegments, ...pageSegments(ins, chunkPages)], [baseSegments, ins, chunkPages])
-  const selRange = selectionRange(ins, selection, chunkPages)
+  const selRange = selectionRange(ins, selection, chunkPages, reads)
 
   useEffect(() => {
     const el = wrap.current
@@ -220,7 +220,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
         const { x: rx, w } = rect({ start: r.offset, end: r.offset + r.length })
         return x >= rx && x <= rx + w
       })
-      return r ? { label: `読み込み #${r.id}: ${r.purpose}`, range: { start: r.offset, end: r.offset + r.length }, sel: { kind: 'reads' } as const } : null
+      return r ? { label: `読み込み #${r.id}: ${r.purpose}`, range: { start: r.offset, end: r.offset + r.length }, sel: { kind: 'reads', id: r.id } as const } : null
     }
     // 最小幅で広げて描いた領域も拾えるよう、描画と同じ矩形で判定する（後に描いたものが上）
     for (let i = segments.length - 1; i >= 0; i--) {

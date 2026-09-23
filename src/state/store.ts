@@ -27,7 +27,8 @@ export type Selection =
   /** page は ChunkPages.pages の添字（辞書ページがあれば 0 が辞書ページ） */
   | { kind: 'page'; rg: number; col: number; page: number }
   | { kind: 'pageIndex' }
-  | { kind: 'reads' }
+  /** id があれば、その read を選んでいる（Physical File Map でその範囲を示す） */
+  | { kind: 'reads'; id?: number }
   | { kind: 'plan' }
 
 /** 選択の発生元。地図以外で選んだときだけ地図をその場所へ動かす */

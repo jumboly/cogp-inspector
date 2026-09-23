@@ -42,14 +42,15 @@ HTTP Range Request で読めます。
 
 ## 開発ステータス
 
-**MVP 完了。** ファイルを開くと Footer だけを読み、Parquet・GeoParquet・COGP の構造を表示します。
+**Phase 2 完了。** ファイルを開くと Footer だけを読み、Parquet・GeoParquet・COGP の構造を表示します。
+Page・Page Index を必要な分だけ読んで表示し、Access Simulator で地図の表示範囲から読む範囲を推定します。
 公開版: <https://www.jumboly.jp/cogp-inspector/>
 
 - [x] 仕様・既存実装・ライブラリの調査（[docs/design.md](docs/design.md)）
 - [x] 基本方針の決定
 - [x] 空のプロジェクト（Vite + React + TypeScript + MapLibre）と GitHub Pages への自動公開設定
 - [x] MVP 実装（ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
-- [ ] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
+- [x] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
 - [ ] Phase 3（実データ描画、比較、診断）
 
 未対応の課題は [docs/issues/](docs/issues/) に下書きし、GitHub Issue として管理します。
@@ -59,13 +60,16 @@ HTTP Range Request で読めます。
 | 画面 | できること |
 |---|---|
 | ヘッダー | ローカルファイル / URL（HTTP Range Request）で開く。実際に読んだ回数とバイト数を表示（クリックで一覧） |
-| Structure（左） | ファイルの先頭 → 末尾の並びで構造をたどる。Schema・GeoParquet・COGP の情報が末尾の Footer の中にあることが階層で分かる |
-| 地図（中央） | Row Group の bbox を Level の色で描画。表示 Level を選ぶと、その Level で読む prefix（RG 0〜row_group_end）だけを表示し、その Level で増えた Row Group を太線で強調。クリックで Row Group を選択 |
-| Inspector（右） | 選んだ要素の詳細と、Parquet / GeoParquet / COGP のどの層の何なのかの解説 |
-| Physical File Map（下） | ファイル全体のバイト配置（Row Group・Column Chunk・Page Index・Footer）と、実際に読んだ範囲。ホイールで拡大、ドラッグで移動、クリックで選択 |
+| Structure（左） | ファイルの先頭 → 末尾の並びで構造をたどる。Schema・GeoParquet・COGP の情報が末尾の Footer の中にあることが階層で分かる。Column Chunk を開くとページが並ぶ |
+| 地図（中央） | Row Group の bbox を Level の色で描画。表示 Level を選ぶと、その Level で読む prefix（RG 0〜row_group_end）だけを表示し、その Level で増えた Row Group を太線で強調。クリックで Row Group を選択。Row Group を選ぶとページ単位の bbox（Page bbox）も青で描く |
+| Access Simulator（地図の左上） | ON にすると、地図を動かすたびに「Level 選択 → Row Group の絞り込み → Page Index → ページの絞り込み → Range の合体」の順に読む範囲を推定し、Inspector に段階ごとの候補数とバイト数を表示。読む列も選べる |
+| Inspector（右） | 選んだ要素の詳細と、Parquet / GeoParquet / COGP のどの層の何なのかの解説。Column Chunk ではページ一覧・辞書ページ・ColumnIndex の min/max、Row Group では Page bbox の一覧 |
+| Physical File Map（下） | ファイル全体のバイト配置（Row Group・Column Chunk・Page・Page Index・Footer）、Simulator が推定した読む予定の範囲、実際に読んだ範囲。ホイールで拡大、ドラッグで移動、クリックで選択 |
+| Range Request 一覧（ヘッダーの「読み込み N 回」） | 実際に読んだ範囲を目的別に集計し、操作ごとのまとまりで時系列（ウォーターフォール）に表示。クリックで Physical File Map にその範囲を示す |
 
 初期処理で読むのは末尾 8 バイトと Footer だけです（公式サンプルでは 2 回・482KB、ファイルの 0.022%）。
-データ本体（Row Group）はまだ読みません。
+Page Index とページヘッダは、Column Chunk・Row Group を選んだときや Simulator の候補に残ったときに、その分だけ読みます。
+データページ（Row Group の中身）はまだ読みません（Phase 3 で対応）。
 
 ## 起動方法
 

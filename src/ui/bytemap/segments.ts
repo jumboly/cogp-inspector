@@ -2,6 +2,7 @@ import { levelOfRowGroup } from '../../cogp/lod'
 import type { Inspection } from '../../inspect'
 import type { ByteRange } from '../../parquet/model'
 import type { ChunkPages } from '../../parquet/pages'
+import type { ReadRecord } from '../../io/source'
 import type { Loadable, Selection } from '../../state/store'
 import { levelColor, NEUTRAL } from '../../util/color'
 import { columnRole, type ColumnRole } from '../inspector/columnRole'
@@ -78,7 +79,7 @@ export function pageSegments(ins: Inspection, chunkPages: Record<string, Loadabl
 }
 
 /** 選択に対応するファイル内の範囲。Level は「RG 0 から row_group_end まで」の連続範囲（prefix）になる */
-export function selectionRange(ins: Inspection, sel: Selection | null, chunkPages?: Record<string, Loadable<ChunkPages>>): ByteRange | undefined {
+export function selectionRange(ins: Inspection, sel: Selection | null, chunkPages?: Record<string, Loadable<ChunkPages>>, reads?: ReadRecord[]): ByteRange | undefined {
   if (!sel) return undefined
   const { file, lod } = ins
   switch (sel.kind) {
@@ -103,6 +104,10 @@ export function selectionRange(ins: Inspection, sel: Selection | null, chunkPage
       return file.pageIndex
     case 'plan':
       return undefined
+    case 'reads': {
+      const r = sel.id === undefined ? undefined : reads?.find((x) => x.id === sel.id)
+      return r && { start: r.offset, end: r.offset + r.length }
+    }
     case 'level': {
       const end = lod?.levels[sel.level]?.rowGroupEnd
       if (end === undefined || !file.rowGroups.length) return undefined

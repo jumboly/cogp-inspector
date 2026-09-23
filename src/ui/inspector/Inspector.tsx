@@ -11,6 +11,7 @@ import { LevelPrefix } from './LevelPrefix'
 import { AccessPlanView } from './AccessPlanView'
 import { PageBboxSection } from './PageBboxView'
 import { ChunkPagesSection, PageView } from './PagesView'
+import { ReadsView } from './ReadsView'
 
 const size = (r: { start: number; end: number }) => r.end - r.start
 
@@ -154,7 +155,7 @@ function Body({ sel, ins }: { sel: Selection; ins: Inspection }) {
       )
     }
     case 'reads':
-      return <ReadsView />
+      return <ReadsView fileSize={file.size} selectedId={sel.id} />
     case 'plan':
       return <AccessPlanView ins={ins} />
   }
@@ -371,34 +372,5 @@ function ColumnView({ ins, chunk: c }: { ins: Inspection; chunk: ColumnChunkMode
       <ChunkPagesSection ins={ins} chunk={c} />
       <RawJson summary="Raw ColumnChunk（Thrift をデコードしたもの）" text={toJsonText(c.raw)} />
     </>
-  )
-}
-
-function ReadsView() {
-  const reads = useStore((s) => s.reads)
-  const kind = useStore((s) => s.sourceKind)
-  return (
-    <table className="table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>目的</th>
-          <th>{kind === 'http' ? 'Range ヘッダ' : '範囲'}</th>
-          <th>サイズ</th>
-          <th>時間</th>
-        </tr>
-      </thead>
-      <tbody>
-        {reads.map((r) => (
-          <tr key={r.id} className={r.error ? 'row-error' : undefined}>
-            <td>{r.id}</td>
-            <td>{r.purpose}</td>
-            <td className="mono">{r.rangeHeader ?? formatRange({ start: r.offset, end: r.offset + r.length })}</td>
-            <td>{formatBytes(r.length)}</td>
-            <td>{r.durationMs.toFixed(0)} ms</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }

@@ -596,3 +596,73 @@ a {
   height: 100%;
   background: #009e73;
 }
+/* read の目的の色。Page Index は Physical File Map の Page Index と同じ紫系、ヘッダはページの段と区別できる色 */
+.cat {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: #fff;
+  background: #7a7a8c;
+}
+.cat:empty {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 2px;
+}
+.cat-footer {
+  background: #444;
+}
+.cat-offset-index {
+  background: #b07aa1;
+}
+.cat-column-index {
+  background: #7b3294;
+}
+.cat-page-header {
+  background: #d55e00;
+}
+.burst {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.burst summary {
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.burst > p {
+  margin: 0 6px 4px;
+  font-size: 11px;
+}
+.waterfall {
+  table-layout: fixed;
+}
+.waterfall td:nth-child(1) {
+  width: 44px;
+}
+.waterfall td:nth-child(3) {
+  width: 64px;
+}
+.waterfall td:nth-child(4) {
+  width: 30%;
+}
+.waterfall tr.active td {
+  background: rgba(255, 45, 149, 0.12);
+}
+.waterfall-purpose {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.waterfall-cell {
+  position: relative;
+}
+.waterfall-bar {
+  position: absolute;
+  top: 5px;
+  height: 8px;
+  background: #ff5a36;
+  border-radius: 1px;
+}

@@ -1,6 +1,6 @@
 # 設計メモ
 
-2026-09-23 時点の調査結果と決定事項。MVP は実装済み（§3.2 に実装時の判断を記録）。Phase 2 の判断は §3.3。
+2026-09-23 時点の調査結果と決定事項。MVP・Phase 2 は実装済み（実装時の判断は §3.2・§3.3）。
 推測を含む箇所は【推測】と明記する。
 
 ## 1. 目的と設計の優先順位
@@ -168,6 +168,7 @@ D14〜D22 はユーザーと 1 問ずつ議論して決定。D23 以降は「以
 | D26 | 表示範囲の扱い | 世界を横に繰り返した経度を -180〜180 に戻し、日付変更線をまたぐときは bbox を 2 つに分ける。3857 のファイルは表示範囲をメートルに変換して比べる | 1 つの bbox で表すと、またいだ側の反対の地域まで含んでしまう |
 | D27 | Simulator の地図表示 | Row Group は「残った = 太線、読み飛ばし = 細線」、ページは「読む = 青の枠、読み飛ばし = 薄い枠」。地図の移動が止まって 250ms 後に計算する | 粗い Level の Row Group・ページはほぼ全球を覆って重なるので、塗りはごく薄くし線で見分ける |
 | D28 | Physical File Map の「読む予定」 | 新しい段「読む予定」を追加。funnel で選んだ段に応じ、Level・Row Group の段では Column Chunk 単位、ページ以降はページ（合体後の Range）単位で描く | 同じファイル上で、段を進めるごとに読む範囲が細かくなる様子を見せる |
+| D29 | Range Request の見せ方 | Inspector の一覧で、目的別（Footer・OffsetIndex・ColumnIndex・ページヘッダ）に集計し、300ms 以上空いたら別の「操作のまとまり」として時系列の横棒（ウォーターフォール）で並べる。行を選ぶと Physical File Map にその範囲の枠を出す | 1 回の操作でどんな read が何回・並列に起きたかが見える。新しいペインは作らず D7 の Selection に乗せる |
 
 実装メモ（段階 A）:
 
@@ -222,11 +223,11 @@ IO 層
 ```text
 cogp-inspector/
 ├ src/
-│ ├ io/        source.ts, local.ts, http.ts, traced.ts, errors.ts
-│ ├ parquet/   footer.ts, model.ts, pageIndex.ts, pageHeader.ts (Phase 2)
-│ ├ geo/       geoMetadata.ts, crs.ts, bbox.ts
-│ ├ cogp/      lod.ts（検証）, levels.ts（prefix・選択）
-│ ├ plan/      accessPlan.ts (Phase 2)
+│ ├ io/        source.ts, local.ts, http.ts, traced.ts, errors.ts, coalesce.ts（Range の合体）, readCategory.ts
+│ ├ parquet/   footer.ts, model.ts, pageIndex.ts, pageHeader.ts, pages.ts（Index・ヘッダの読み込みとキャッシュ）
+│ ├ geo/       geoMetadata.ts, crs.ts, bbox.ts, pageBbox.ts
+│ ├ cogp/      lod.ts（検証・prefix）
+│ ├ plan/      accessPlan.ts, viewport.ts
 │ ├ state/     store.ts（ファイル・選択・trace の共有状態。zustand を想定）
 │ ├ ui/        layout/, tree/, map/, inspector/, bytemap/, help/
 │ └ main.tsx
@@ -240,8 +241,8 @@ cogp-inspector/
 
 ## 6. スコープ
 
-- MVP: プロジェクト作成、GitHub Pages 構成、ローカル / URL で開く、Footer 解析、Schema、Row Group 一覧、
+- MVP（実装済み）: プロジェクト作成、GitHub Pages 構成、ローカル / URL で開く、Footer 解析、Schema、Row Group 一覧、
   GeoParquet メタデータ、`geo.lod` 解析、Level 一覧、Level と Row Group の対応、Row Group bbox の地図描画、
   Row Group Inspector、Physical File Map 基本版
-- Phase 2: Column Chunk 詳細、Page、Dictionary、Page Index、Page bbox、Page pruning、Access Simulator、Range Request 可視化
+- Phase 2（実装済み）: Column Chunk 詳細、Page、Dictionary、Page Index、Page bbox、Page pruning、Access Simulator、Range Request 可視化
 - Phase 3: 実データ描画、progressive rendering、Expected vs Actual 比較、通常 GeoParquet との比較、診断
