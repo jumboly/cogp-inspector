@@ -7,6 +7,7 @@ export type SourceErrorKind =
   | 'http-status'
   | 'no-content-length'
   | 'range-not-supported'
+  | 'compressed-transfer'
   | 'short-read'
   | 'not-parquet'
 

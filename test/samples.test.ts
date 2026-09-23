@@ -8,9 +8,9 @@ import { addCost, incomparable, mapColumns, planCost, ZERO_COST } from '../src/p
 import { SAMPLES, sampleOf } from '../src/samples'
 import { nodeFileSource } from './nodeSource'
 
-// 同梱サンプル（public/samples/）は Git に入っているので、公式サンプルと違い CI でも走る
+// 同梱サンプル（samples/）は Git に入っているので、公式サンプルと違い CI でも走る
 async function open(file: string): Promise<{ ins: Inspection; cache: PageCache }> {
-  const src = new TracedSource(nodeFileSource(new URL(`../public/samples/${file}`, import.meta.url).pathname), () => undefined)
+  const src = new TracedSource(nodeFileSource(new URL(`../samples/${file}`, import.meta.url).pathname), () => undefined)
   const ins = await inspect(src)
   return { ins, cache: new PageCache(src, ins.file) }
 }

@@ -30,6 +30,9 @@ jobs:
       - run: npm run build
         env:
           GITHUB_PAGES: 'true'
+          # 比較用サンプルの配信先（Cloudflare R2）。Pages は .parquet を gzip で送り Range が壊れるので、Pages には置かない。
+          # 未設定なら公開版にサンプルのボタンを出さない（リポジトリ変数 SAMPLES_BASE で設定する）
+          VITE_SAMPLES_BASE: ${{ vars.SAMPLES_BASE }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -4,28 +4,30 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 /**
- * 開発時だけ data/ を HTTP Range 付きで配信する。
+ * 開発時だけ data/ と samples/ を HTTP Range 付きで配信する。
  * data/ の公式サンプルは 2.2GB あり public/ に置くとビルドでコピーされてしまうため別経路にする。
+ * samples/ は GitHub Pages に載せない（Pages は .parquet を gzip で送り、Range を圧縮後のバイト列に掛けるため
+ * ファイルとして読めなくなる）。公開版は別の配信先（Cloudflare R2）から読む。
  * また、URL で開いたときの Range Request の様子を手元で再現するため、Range なしの要求には全体を返さず 416 にする。
  */
 function serveData(): Plugin {
   return {
     name: 'serve-data-with-range',
     configureServer(server) {
-      server.middlewares.use('/data/', (req, res) => {
+      for (const dir of ['data', 'samples']) server.middlewares.use(`/${dir}/`, (req, res) => {
         const name = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\/+/, '')
         if (!/^[\w.-]+$/.test(name)) {
           res.statusCode = 400
           res.end()
           return
         }
-        const file = resolve(import.meta.dirname, 'data', name)
+        const file = resolve(import.meta.dirname, dir, name)
         let size: number
         try {
           size = statSync(file).size
         } catch {
           res.statusCode = 404
-          res.end(`data/${name} がありません（README の「サンプルデータ」を参照）`)
+          res.end(`${dir}/${name} がありません（README の「サンプルデータ」を参照）`)
           return
         }
         res.setHeader('Accept-Ranges', 'bytes')

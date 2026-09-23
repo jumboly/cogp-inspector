@@ -33,4 +33,19 @@ describe('HttpRangeSource', () => {
     await src.read(92, 8)
     expect(fetchMock.mock.calls[1][1].headers.Range).toBe('bytes=92-99')
   })
+
+  it('圧縮して送るサーバー（GitHub Pages の .parquet）は、HEAD の Content-Encoding で見分ける', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(head({ 'content-length': '90', 'content-encoding': 'gzip' })))
+    await expect(HttpRangeSource.open('https://example.com/a.parquet')).rejects.toMatchObject({ kind: 'compressed-transfer' })
+  })
+
+  it('Range 応答の全体の長さが HEAD のサイズと違えば、圧縮後のバイト列に掛かっているとみなす', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(head({ 'content-length': '100' }))
+      .mockResolvedValueOnce(new Response(new Uint8Array(8), { status: 206, headers: { 'content-range': 'bytes 82-89/90' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const src = await HttpRangeSource.open('https://example.com/a.parquet')
+    await expect(src.read(82, 8)).rejects.toMatchObject({ kind: 'compressed-transfer' })
+  })
 })

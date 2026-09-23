@@ -5,7 +5,7 @@ import { HttpRangeSource } from '../../io/http'
 import { LocalBlobSource } from '../../io/local'
 import type { AccessPlan } from '../../plan/accessPlan'
 import { planCost, type CumulativeCost } from '../../plan/compareFiles'
-import { SAMPLES, sampleOf, sampleUrl } from '../../samples'
+import { SAMPLES, SAMPLES_AVAILABLE, sampleOf, sampleUrl } from '../../samples'
 import { useStore } from '../../state/store'
 import { formatBytes, formatNumber } from '../../util/format'
 
@@ -169,9 +169,10 @@ function ComparePicker() {
     <>
       <p className="muted">別のファイルを「比較対象」として開くと、同じ表示範囲での読む量を並べて比べます（比較対象は Footer と Page Index だけを読みます）。</p>
       <div className="compare-picker">
-        {current &&
+        {SAMPLES_AVAILABLE &&
+          current &&
           SAMPLES.filter((s) => s.id !== current.id).map((s) => (
-            <button key={s.id} title={s.description} onClick={() => void openCompare(() => HttpRangeSource.open(new URL(sampleUrl(s), location.href).href))}>
+            <button key={s.id} title={s.description} onClick={() => void openCompare(() => HttpRangeSource.open(sampleUrl(s)))}>
               サンプル（{s.label}）と比べる
             </button>
           ))}

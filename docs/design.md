@@ -211,7 +211,7 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
 | D40 | 差の分類 | Actual の各 read を Expected の Range と照合し「予定どおり / 予定外（Expected に無い read）/ 未読（中断などで読まなかった予定）」に分ける。Physical File Map の「読む予定」の段の下に「実際に読んだ」の段を並べる | 自前で読むので通常はほぼ一致する。一致しないときに理由（中断・Index の追加読み込みなど）がすぐ分かるようにする。「予定どおり」が並ぶこと自体が推定の正しさの確認になる |
 | D41 | 診断の置き場所と判定の材料 | Inspector に「診断」タブを追加し、ファイルを開いた時点で Footer だけから判定する。MUST・SHOULD・仕様外の目安の 3 群に分け、各項目に根拠の値を出し、クリックで該当する Row Group などを選ぶ。Page Index が要る項目（ページ境界がそろっているか等）は「未確認」とし、その Row Group を選んで Index を読んだ後に判定する | 「開くときは Footer だけ」（D15）を守る。MUST と SHOULD を混ぜない（issue 07）。D7 の Selection に乗せ、新しいペインは作らない |
 | D42 | 空間的なまとまりの指標 | Level ごとに「その Level で加わった Row Group の bbox 面積の合計 ÷ それらの bbox を合わせた範囲の面積」を重なり係数として出す。合否は付けず、1 に近いほど重なりが少ないと説明する | Footer の統計値だけで計算できる。閾値には根拠が無いので決めず、E の比較で元の順・Hilbert 順・COGP の値を並べて意味を読ませる |
-| D43 | 比較用サンプル（issue 01） | 公式サンプルから 1 地域を切り出し、同じ行・同じ列・同じ圧縮・同じ Row Group の大きさ・Page Index ありで 3 種類作る: (1) 元の順（id 順）の通常 GeoParquet、(2) Hilbert 順の通常 GeoParquet、(3) cogp-rs で作った COGP。各 20MB 以下を目安とし、生成スクリプトを `scripts/` に置いて出力を `public/samples/` にコミットする。ライセンスは元データの表記を README とサンプルの説明に書く | (1)と(2)の差で「空間的にまとめる」効果、(2)と(3)の差で「Level がある」効果が分かれて見える（§1 の問いに対応）。20MB 以下なら Git に直接置いても重くない。公開版で CORS を気にせず開ける |
+| D43 | 比較用サンプル（issue 01） | 公式サンプルから 1 地域を切り出し、同じ行・同じ列・同じ圧縮・同じ Row Group の大きさ・Page Index ありで 3 種類作る: (1) 元の順（id 順）の通常 GeoParquet、(2) Hilbert 順の通常 GeoParquet、(3) cogp-rs で作った COGP。各 20MB 以下を目安とし、生成スクリプトを `scripts/` に置いて出力を `samples/` にコミットする（当初は `public/samples/`。公開後の修正を参照）。ライセンスは元データの表記を README とサンプルの説明に書く | (1)と(2)の差で「空間的にまとめる」効果、(2)と(3)の差で「Level がある」効果が分かれて見える（§1 の問いに対応）。20MB 以下なら Git に直接置いても重くない。公開版で CORS を気にせず開ける |
 | D44 | 比較の UI | 開いているファイルとは別に「比較対象」を 1 つ開く（Footer と Page Index だけ読む）。同じ表示範囲で両方に Access Plan を計算し、funnel を横に並べる。値は「現在の表示範囲」と「Simulator を ON にしてからの累計」の 2 通り。実データを読むのは主ファイルだけ | issue 06 の未決事項（単位・2 ファイルの UI）への答え。地図・ツリー・Physical File Map は主ファイルのまま変えず、変更を funnel に閉じ込める。比較対象の実データまで読むと通信量が倍になるため |
 | D45 | 公開版の入口 | ファイルを開く画面に「サンプルを開く（元の順 / Hilbert 順 / COGP）」ボタンを置き、COGP を開くと他の 2 つを比較対象に選べるようにする | 公開版ですぐ試せる入口が無いという issue 01 の問題を解く |
 
@@ -271,7 +271,7 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
   cogp-rs 単体のリポジトリ（Kanahiro/cogp-rs）は仕様リポジトリに統合されてアーカイブ済みで、古い `cogp` メタデータ（`gsd`）を書くので使わない。
 - そろえた条件: Row Group 8,192 行・ページ 1,024 行・ZSTD レベル 3・geometry と bbox は辞書なし・Page Index あり。Row Group を公式サンプルの 65,536 行より小さくしたのは、15 万行では通常 GeoParquet が 3 個の Row Group にしかならず、Row Group 単位の読み飛ばしの差が見えないため。
   そろえられなかった点: pyarrow は ColumnIndex を全列に書く（cogp は bbox 列だけ）。`store_schema=False` で ARROW:schema を省き、Footer の大きさを近づけた（19.3KB / 19.1KB / 28.7KB。COGP は Row Group が多い分大きい）。
-- 生成結果: 元の順 12.2MB・19 RG、Hilbert 順 12.2MB・19 RG、COGP 11.8MB・28 RG・16 Level（z0〜z16 のうち空の Level が 1 つ落ちた）。Level 0 は 1 行だけ（範囲が 0.36° 四方と狭く、最も粗い Level の間引きの格子に 1 点しか入らない）。サイズは 20MB（D43）を下回り、`public/samples/` に置いて Git で管理する。
+- 生成結果: 元の順 12.2MB・19 RG、Hilbert 順 12.2MB・19 RG、COGP 11.8MB・28 RG・16 Level（z0〜z16 のうち空の Level が 1 つ落ちた）。Level 0 は 1 行だけ（範囲が 0.36° 四方と狭く、最も粗い Level の間引きの格子に 1 点しか入らない）。サイズは 20MB（D43）を下回り、`samples/` に置いて Git で管理する。
 - 重なり係数（D42）: 元の順は全体で 18.91（19 個の Row Group がどれもほぼデータ全体を覆う）、Hilbert 順は 1.31、COGP は Level ごとに 0.96〜1.00。lod の無いファイル向けに、診断の目安に「全 Row Group の重なり係数」を足した（COGP では Level どうしが同じ範囲を覆うので出さない）。
 - 比較対象は `compare` として store に持ち、主ファイルとは別の `TracedSource`・`PageCache` で読む。主ファイルの Range 記録・Physical File Map・Expected vs Actual に比較対象の read を混ぜないため。主ファイルを開き直すと比較対象も閉じる（別の地域のファイルと比べても意味が薄いため）。
 - 表示範囲は主ファイルの CRS で渡されるので、比較対象の地図投影が違えば計算せず理由を出す。読む列は番号ではなく名前で対応づける（cogp は bbox 列を作り直すので、並びがファイルごとに違いうる）。
@@ -286,6 +286,16 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
   | 渋谷駅付近（0.00002°/px） | 5.97MB・19 回 | 0.25MB・15 回 | 0.51MB・60 回（Level 13） |
 
   元の順は拡大しても何も読み飛ばせない。Hilbert 順は拡大すると Row Group・ページで絞れるが、全体表示では全行を読む。COGP は全体表示で Level による prefix が効き、拡大すると粗い Level から続く prefix の分だけ Hilbert 順より多く読む。§1 の「なぜ空間的にまとめるのか」「なぜ Level があるのか」がこの 3 列で分かれて見える。
+
+公開後の修正（段階 E）:
+
+- 公開版で同梱サンプルが開けなかった（「末尾の magic が PAR1 ではありません」）。GitHub Pages は `.parquet`（`application/octet-stream`）を gzip で送り、
+  Content-Length も Range も圧縮後のバイト列を指す（`tokyo-id.parquet` は 12,215,337 B が 12,141,646 B になる）。ブラウザは Accept-Encoding を自動で付け、
+  `identity` だけを求めることもできないので、fetch の側では避けられない。同じ問題の報告: [community #178318](https://github.com/orgs/community/discussions/178318)、[PMTiles #584](https://github.com/protomaps/PMTiles/issues/584)。
+- D43 の「`public/samples/` に置けば公開版で CORS を気にせず開ける」は誤りだった。サンプルは `samples/` に移して Pages に載せず、公開版は Cloudflare R2 から読む（ユーザーと決定）。
+  URL はビルド時の `VITE_SAMPLES_BASE`（GitHub のリポジトリ変数 `SAMPLES_BASE`）で渡し、未設定ならサンプルのボタンを出さない。開発サーバーは `samples/` を `data/` と同じく Range 付きで配信する。
+- `HttpRangeSource` は、応答に Content-Encoding が付いている、または Range 応答の全体の長さが HEAD のサイズと違うときに `compressed-transfer` として止め、理由を出す。
+  どちらのヘッダもクロスオリジンでは公開されていないと読めないので、読めたときだけ確かめる。
 
 ## 4. アーキテクチャ（MVP で実装済み）
 
@@ -327,7 +337,7 @@ cogp-inspector/
 │ ├ state/     store.ts（ファイル・選択・trace の共有状態。zustand を想定）
 │ ├ ui/        layout/, tree/, map/, inspector/, bytemap/, help/
 │ └ main.tsx
-├ public/samples/  比較用サンプル 3 種類（元の順 / Hilbert 順 / COGP、各約 12MB。テストでも使う）
+├ samples/         比較用サンプル 3 種類（元の順 / Hilbert 順 / COGP、各約 12MB。テストでも使う。公開版は R2 から配信）
 ├ scripts/         make_samples.py（サンプルの生成）
 ├ data/            大容量サンプル（Git 管理外、ハードリンク）
 ├ docs/            設計メモ・Issue 下書き

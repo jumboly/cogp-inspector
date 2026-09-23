@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { HttpRangeSource } from '../../io/http'
 import { LocalBlobSource } from '../../io/local'
-import { SAMPLE_ATTRIBUTION, SAMPLES, sampleUrl } from '../../samples'
+import { SAMPLE_ATTRIBUTION, SAMPLES, SAMPLES_AVAILABLE, sampleUrl } from '../../samples'
 import { useDiagnosis } from '../../state/diagnosis'
 import { useStore } from '../../state/store'
 import { formatBytes, formatNumber, formatPercent } from '../../util/format'
@@ -53,14 +53,16 @@ export function OpenBar() {
           URL を開く
         </button>
       </form>
-      <span className="sample-buttons" title={`東京 23 区付近の POI（約 15 万行）。並び順だけが違う 3 つのファイルを同梱しています。${SAMPLE_ATTRIBUTION}`}>
-        サンプル:
-        {SAMPLES.map((s) => (
-          <button key={s.id} onClick={() => void openUrl(sampleUrl(s))} disabled={status === 'loading'} title={s.description}>
-            {s.label}
-          </button>
-        ))}
-      </span>
+      {SAMPLES_AVAILABLE && (
+        <span className="sample-buttons" title={`東京 23 区付近の POI（約 15 万行）。並び順だけが違う 3 つのファイルを同梱しています。${SAMPLE_ATTRIBUTION}`}>
+          サンプル:
+          {SAMPLES.map((s) => (
+            <button key={s.id} onClick={() => void openUrl(sampleUrl(s))} disabled={status === 'loading'} title={s.description}>
+              {s.label}
+            </button>
+          ))}
+        </span>
+      )}
       {import.meta.env.DEV && (
         <button onClick={() => void openUrl(DEV_SAMPLE)} disabled={status === 'loading'} title="開発サーバーが data/ から Range 付きで配信します">
           dev サンプル
@@ -83,7 +85,7 @@ export function OpenBar() {
         )}
         {status === 'idle' && (
           <span className="muted">
-            まずは「サンプル」の COGP を開き、Access Simulator で元の順・Hilbert 順と比べてみてください。公式サンプル（2.2GB）は{' '}
+            {SAMPLES_AVAILABLE && 'まずは「サンプル」の COGP を開き、Access Simulator で元の順・Hilbert 順と比べてみてください。'}公式サンプル（2.2GB）は{' '}
             <a href={OFFICIAL_SAMPLE} target="_blank" rel="noreferrer">
               ダウンロード
             </a>{' '}

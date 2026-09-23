@@ -4,7 +4,7 @@
 # ///
 """比較用サンプル 3 種類を作る（design.md D43）。
 
-公式サンプル（全世界の POI、COGP）から東京 23 区付近を切り出し、次の 3 つを public/samples/ に書く。
+公式サンプル（全世界の POI、COGP）から東京 23 区付近を切り出し、次の 3 つを samples/ に書く。
 
 1. tokyo-id.parquet       元の順（id 順）の通常 GeoParquet
 2. tokyo-hilbert.parquet  Hilbert 順の通常 GeoParquet
@@ -136,7 +136,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", type=Path, default=Path("data/pois.cogp.parquet"))
     ap.add_argument("--cogp", type=Path, required=True, help="cogp v1.0.0 の CLI")
-    ap.add_argument("--out", type=Path, default=Path("public/samples"))
+    ap.add_argument("--out", type=Path, default=Path("samples"))
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
 

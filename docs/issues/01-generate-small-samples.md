@@ -14,4 +14,4 @@
 - 生成手順をスクリプト化してリポジトリに置くか
 
 ## 結論
-Phase 3 段階 E で対応済み（design.md D43・D45、§3.4 の実装メモ（段階 E））。公式サンプルから東京 23 区付近（152,127 行）を切り出し、元の順 / Hilbert 順 / COGP の 3 種類（各約 12MB）を `scripts/make_samples.py` で生成して `public/samples/` に置いた。ライセンスは元データ（OpenStreetMap、ODbL）の表記を README とサンプルの説明に書いた。
+Phase 3 段階 E で対応済み（design.md D43・D45、§3.4 の実装メモ（段階 E））。公式サンプルから東京 23 区付近（152,127 行）を切り出し、元の順 / Hilbert 順 / COGP の 3 種類（各約 12MB）を `scripts/make_samples.py` で生成して `samples/` に置いた。公開版は GitHub Pages ではなく Cloudflare R2 から配信する（Pages の gzip 配信で Range が壊れるため。design.md §3.4「公開後の修正」）。ライセンスは元データ（OpenStreetMap、ODbL）の表記を README とサンプルの説明に書いた。

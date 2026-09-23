@@ -1,6 +1,27 @@
 import { SourceError } from './errors'
 import type { RandomAccessSource } from './source'
 
+function compressedError(message: string): SourceError {
+  return new SourceError(
+    'compressed-transfer',
+    message,
+    'サーバーがファイルを圧縮して送っているため、Range がファイルの位置ではなく圧縮後のバイト列に掛かります（GitHub Pages が .parquet に対してこうなります）。' +
+      '圧縮せずに送る配信先（S3、R2 など）に置くか、ダウンロードして「ローカルファイルを開く」で読んでください。',
+  )
+}
+
+/**
+ * Content-Encoding が付いていたら読めない。ブラウザは Accept-Encoding を自動で付け、identity だけを求めることもできない。
+ * クロスオリジンでは公開されていないと読めないので、読めたときだけ確かめる
+ */
+function checkEncoding(res: Response) {
+  const enc = res.headers.get('content-encoding')
+  if (enc && enc !== 'identity') {
+    void res.body?.cancel()
+    throw compressedError(`サーバーが Content-Encoding: ${enc} で応答しました`)
+  }
+}
+
 /**
  * HTTP Range Request で必要な範囲だけを取得する。
  *
@@ -36,6 +57,8 @@ export class HttpRangeSource implements RandomAccessSource {
     if (!res.ok) {
       throw new SourceError('http-status', `HEAD ${url} が ${res.status} ${res.statusText} を返しました`, 'URL が正しいか確認してください。')
     }
+    // 圧縮して送るサーバーでは、Content-Length も Range も圧縮後のバイト列を指し、ファイルの位置と合わなくなる
+    checkEncoding(res)
     const length = res.headers.get('content-length')
     const size = length === null ? NaN : Number(length)
     if (!Number.isFinite(size) || size <= 0) {
@@ -87,6 +110,14 @@ export class HttpRangeSource implements RandomAccessSource {
     }
     if (res.status !== 206) {
       throw new SourceError('http-status', `Range 取得で ${res.status} ${res.statusText} が返りました`, 'URL とサーバーの設定を確認してください。')
+    }
+    checkEncoding(res)
+    // HEAD と Range で全体の長さが食い違うなら、Range が別の表現（圧縮後など）に掛かっている。
+    // Content-Range はクロスオリジンでは公開されていないと読めないので、読めたときだけ確かめる
+    const total = /\/(\d+)$/.exec(res.headers.get('content-range') ?? '')?.[1]
+    if (total !== undefined && Number(total) !== this.size) {
+      void res.body?.cancel()
+      throw compressedError(`Range 応答の全体の長さ ${total} が、HEAD で得たサイズ ${this.size} と違います`)
     }
     return res
   }

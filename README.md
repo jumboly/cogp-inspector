@@ -86,7 +86,7 @@ npm run build   # 静的ファイルを dist/ に出力（main への push で G
 
 ### サンプルデータ
 
-ヘッダーの「サンプル」から、同梱の比較用サンプル 3 種類を開けます（`public/samples/`、各約 12MB）。
+ヘッダーの「サンプル」から、同梱の比較用サンプル 3 種類を開けます（`samples/`、各約 12MB）。
 COGP 公式サンプルから東京 23 区付近の POI（152,127 行）を切り出し、並び順だけを変えたものです。
 
 | ボタン | ファイル | 並び順 |
@@ -98,6 +98,10 @@ COGP 公式サンプルから東京 23 区付近の POI（152,127 行）を切�
 行・列・圧縮・Row Group（8,192 行）とページ（1,024 行）の大きさはそろえてあります。
 COGP を開いて Access Simulator を ON にし、「比較対象」に残りの 2 つを選ぶと、同じ表示範囲で読む量を比べられます。
 データは © OpenStreetMap contributors で、[ODbL](https://opendatacommons.org/licenses/odbl/) のもとで提供されています。
+
+開発サーバーは `samples/` を Range 付きで配信します。公開版は GitHub Pages に置かず、Cloudflare R2 から読みます
+（Pages は `.parquet` を gzip で送り、Range を圧縮後のバイト列に掛けるため、ファイルとして読めなくなります）。
+配信先はリポジトリ変数 `SAMPLES_BASE` で指定し、ビルド時に `VITE_SAMPLES_BASE` として渡します。未設定ならサンプルのボタンは出ません。
 
 作り直すときは、公式サンプルを `data/` に置き、[cogp v1.0.0](https://github.com/Kanahiro/cloud-optimized-geoparquet/releases/tag/v1.0.0) の CLI を用意して実行します（[uv](https://docs.astral.sh/uv/) が必要）。
 
@@ -124,4 +128,4 @@ curl -o data/pois.cogp.parquet https://cogp-demo.spatialty.io/v1.0.0/pois.cogp.p
 
 ## ライセンス
 
-コードのライセンスは未定です。同梱サンプル（`public/samples/`）のデータは © OpenStreetMap contributors（ODbL）です。
+コードのライセンスは未定です。同梱サンプル（`samples/`）のデータは © OpenStreetMap contributors（ODbL）です。
