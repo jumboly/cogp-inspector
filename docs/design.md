@@ -301,6 +301,32 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
   gzip は掛からず、HEAD の Content-Length は元のサイズと一致し、Range は 206 を返す。3 ファイルとも SHA-1 が手元と一致した。
   r2.dev は公式に「開発向け・レート制限あり」とされるが、1 セッション数十回の Range なら足りる見込み【推測】。足りなければカスタムドメインに移す。
 
+### 3.5 GeoParquet 2.0 対応の判断（2026-09-23）
+
+D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「おすすめで進める」の指示のもとおすすめ案で決定。
+
+調査で分かったこと（2026-09-23 時点）:
+
+- v2.0.0-rc.1 は 2026-07-19 に公開。geometry 列は Parquet ネイティブの GEOMETRY / GEOGRAPHY 論理型（WKB）が MUST で、`encoding` は `"WKB"` だけになった。
+- `geo` は MUST だが、writer は論理型だけを書いてもよい（その場合は 2.0 に準拠しないが、2.0 の reader は読めるべき）。GDAL の `USE_PARQUET_GEO_TYPES=ONLY` などが `geo` の無いファイルを書く。
+- CRS の正は論理型の `crs`。`geo` 側は PROJJSON か null だけ。両者は同じ CRS を表す MUST があるが、食い違ったときの reader の振る舞いは決まっていない。
+  論理型の表記は PROJJSON・`authority:code`・`srid:<n>`・`projjson:<key>`（key-value メタデータを参照）の 4 通りで、省略は OGC:CRS84。
+- `geospatial_statistics`（ColumnMetaData の field 17）は Row Group 単位だけ。ColumnIndex に地理の統計は無い。geometry 列の通常の min/max は reader が無視する MUST。
+- bbox は日付変更線をまたぐときだけ X が xmin > xmax になり得る（x >= xmin または x <= xmax と読む）。
+- bbox covering は rc.1 で消え、2026-09-07（opengeospatial/geoparquet #302）に任意の機能として戻った。ページ単位の絞り込みには covering が要る。
+- COGP の `lod` は `geo` の中に置くので、`geo` の無いファイルは COGP になり得ない。
+- 出典: [geoparquet.md](https://github.com/opengeospatial/geoparquet/blob/main/format-specs/geoparquet.md)、[parquet-format Geospatial.md](https://github.com/apache/parquet-format/blob/master/Geospatial.md)
+
+| # | 論点 | 決定 | 理由 |
+|---|---|---|---|
+| D46 | `geo` が無く論理型だけのファイル | 論理型から GeoModel を組み立てる。主ジオメトリ列はスキーマ上で最初の geometry 列。地図・Row Group bbox・Simulator・実データ描画はそのまま動かし、診断に「geo が無いので 2.0 に準拠しない（2.0 の reader は読める）」を出す。Level 関連は対象外 | 2.0 の reader に求められる振る舞い。GDAL の ONLY 出力などで空間の絞り込みが見えるようにする |
+| D47 | CRS の決め方と食い違い | 地図の投影と resolution の単位は論理型の crs で決める。Inspector に論理型と geo の両方を並べ、識別子で比べて食い違えば診断で MUST 違反にする。4 通りの表記をすべて解釈し、`srid:0` は CRS 不明、`srid:4326`・`srid:3857` はその EPSG として扱う | 仕様が論理型を正と定めている。食い違いは隠さず見せるのがデバッガの役目 |
+| D48 | 日付変更線と GEOGRAPHY | xmin > xmax の bbox は [xmin, 180] と [-180, xmax] の 2 つに分け、描画にも絞り込みにも使う（どちらかに重なれば重なる）。GEOGRAPHY の bbox は統計の値をそのまま使い、実データの線と面は平面のまま描いて注記を出す | 太平洋をまたぐデータでも絞り込みを効かせる。GEOGRAPHY の bbox は書き手が辺を考えて求める |
+| D49 | サンプル | (a) テスト用に apache/parquet-testing の geospatial のサンプル（geo なし・srid・projjson・GEOGRAPHY）と geoparquet の example.parquet を `test/fixtures/` に置く。(b) `make_samples.py` で東京の COGP を論理型で書き直した版（geo 2.0.0・lod・covering を残し、行の順と Row Group は同じ）を作り、公開版では 4 つ目のサンプルとして R2 に置く | (a) は小さく、表記のばらつきを網羅できる。(b) で「2.0 の COGP」を実際に試せ、1.1 版と同じ条件で比べられる |
+| D50 | geometry 列の統計 | 通常の min/max と ColumnIndex の値は表示するが判定に使わない。`geospatial_statistics` の bbox と `geospatial_types`（ISO WKB の番号を名前にする）を Column Chunk の Inspector に出す | 仕様が reader に無視を求めている。表示は残して「書かれているが使わない」ことを見せる |
+| D51 | 診断に足す項目 | MUST: 論理型と geo の CRS が一致、`geometry_types` と `geospatial_types` が一致、version 2.x なら geometry 列が論理型。geo が無いファイルは注意を出す | 2.0 で増えた MUST をそのまま確かめる |
+| D52 | 作る順番 | A. GeoModel の統合（D46・D47・D50）→ B. 日付変更線（D48）→ C. 診断（D51）→ D. サンプルとテスト（D49）。段階ごとに commit + push | A が他のすべての土台。サンプルは作りながら手元の fixture で確かめ、最後に公開用をそろえる |
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text

@@ -15,4 +15,4 @@ GeoParquet 2.0（rc.1、2026-07）では Parquet ネイティブの GEOMETRY / G
 - `geo` と論理型の CRS が食い違うときの表示
 
 ## 結論
-（未定）
+design.md §3.5（D46〜D52）で方針を決定。実装は段階 A〜D で進める。
