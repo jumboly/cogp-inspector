@@ -1,8 +1,8 @@
 import type { ColumnChunkModel, RowGroupModel } from '../parquet/model'
 import type { ColumnIndexModel, OffsetIndexModel } from '../parquet/pageIndex'
 import type { IndexKind, PageCache } from '../parquet/pages'
-import { splitWrapped, wrapsX, type Bbox } from './bbox'
-import type { GeoModel } from './geoMetadata'
+import { samePath, splitWrapped, statNumber, wrapsX, type Bbox } from './bbox'
+import { coveringPaths, type GeoModel } from './geoMetadata'
 
 /** Row Group 内の行の半開区間 [start, end) */
 export interface RowSpan {
@@ -22,13 +22,11 @@ export type PageBboxes =
   | { available: true; aligned: boolean; spans: SpanBbox[] }
   | { available: false; reason: string }
 
-const samePath = (a: string[], b: string[]) => a.length === b.length && a.every((s, i) => s === b[i])
-
 /** bbox covering の 4 列の Column Chunk（xmin, ymin, xmax, ymax の順）。covering が無ければ undefined */
-export function coveringChunks(rg: RowGroupModel, geo: GeoModel | undefined): ColumnChunkModel[] | undefined {
+function coveringChunks(rg: RowGroupModel, geo: GeoModel | undefined): ColumnChunkModel[] | undefined {
   const cov = geo?.primary?.covering
   if (!cov) return undefined
-  const chunks = [cov.xmin, cov.ymin, cov.xmax, cov.ymax].map((p) => rg.columns.find((c) => samePath(c.column.path, p)))
+  const chunks = coveringPaths(cov).map((p) => rg.columns.find((c) => samePath(c.column.path, p)))
   return chunks.every(Boolean) ? (chunks as ColumnChunkModel[]) : undefined
 }
 
@@ -44,7 +42,8 @@ function pageAt(oi: OffsetIndexModel, row: number): number {
   return lo
 }
 
-const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'bigint' ? Number(v) : NaN)
+// 数値でない min/max は NaN にして、その範囲を bbox 不明（読み飛ばさない）として扱う
+const num = (v: unknown) => statNumber(v) ?? NaN
 
 /**
  * ページ単位の bbox を、covering 4 列の ColumnIndex から組み立てる（design.md D17）。

@@ -41,7 +41,7 @@ interface Row {
 }
 
 /**
- * 通常の GeoParquet と COGP の比較（design.md D44、issue 06）。
+ * 通常の GeoParquet と COGP の比較（design.md D44）。
  * 開いているファイルとは別に「比較対象」を 1 つ開き、同じ表示範囲・縮尺・列で Access Plan を計算して funnel を並べる。
  * 比較対象は実データを読まないので、比べるのは両方とも推定（Expected）の値
  */

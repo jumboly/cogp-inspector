@@ -1,7 +1,7 @@
 import type { Selection } from '../../state/store'
 
 /** 教材として、選んだ要素が Parquet / GeoParquet / COGP のどの層の何なのかを 1〜2 文で説明する */
-export const HELP: Partial<Record<Selection['kind'], { layer: 'Parquet' | 'GeoParquet' | 'COGP' | 'アクセス'; text: string }>> = {
+const HELP: Partial<Record<Selection['kind'], { layer: 'Parquet' | 'GeoParquet' | 'COGP' | 'アクセス'; text: string }>> = {
   file: { layer: 'Parquet', text: 'Parquet は列指向のファイル形式です。データ本体（Row Group）が先頭側に、それを説明するメタデータ（Footer）が末尾にあります。' },
   header: { layer: 'Parquet', text: 'ファイル先頭の 4 バイトは magic "PAR1" です。Parquet であることの目印で、リーダーは通常ここを読みません。' },
   rowGroups: { layer: 'Parquet', text: 'Row Group は行をまとめた単位です。リーダーは Row Group 単位で読むか読まないかを決められます。' },

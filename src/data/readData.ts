@@ -1,6 +1,7 @@
 import type { Geometry } from 'geojson'
 import type { Compressors } from 'hyparquet'
 import { levelOfRowGroup } from '../cogp/lod'
+import { isTopLevel } from '../geo/geoMetadata'
 import { intersects } from '../geo/pageBbox'
 import type { Inspection } from '../inspect'
 import { coalesce, mapLimit, READ_CONCURRENCY } from '../io/coalesce'
@@ -46,7 +47,7 @@ export interface DataReadResult {
 /** 主ジオメトリ列（葉の列）。GeoParquet 1.x の WKB は入れ子にならないので、パスの長さ 1 の列だけを探す */
 export function geometryColumn(ins: Inspection): LeafColumn | undefined {
   const name = ins.geo?.primary?.name
-  return name === undefined ? undefined : ins.file.leafColumns.find((c) => c.path.length === 1 && c.path[0] === name)
+  return name === undefined ? undefined : ins.file.leafColumns.find((c) => isTopLevel(c.path, name))
 }
 
 /** 実データを読めない理由。読む前に Expected（推定）だけで判断できるものに限る */

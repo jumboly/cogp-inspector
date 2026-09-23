@@ -6,7 +6,7 @@ import type { Inspection } from '../../inspect'
 import type { ColumnChunkModel } from '../../parquet/model'
 import { useStore, type Selection } from '../../state/store'
 import { levelColor } from '../../util/color'
-import { formatBytes, formatNumber, formatPercent, formatRange, formatValue, toJsonText } from '../../util/format'
+import { formatBytes, formatNumber, formatPercent, formatRange, formatValue, toJsonText, rangeSize as size } from '../../util/format'
 import { KV, RawJson } from '../common/KV'
 import { columnRole, ROLE_LABEL } from './columnRole'
 import { Help, Overview } from './help'
@@ -17,7 +17,6 @@ import { PageBboxSection } from './PageBboxView'
 import { ChunkPagesSection, PageView } from './PagesView'
 import { ReadsView } from './ReadsView'
 
-const size = (r: { start: number; end: number }) => r.end - r.start
 
 /**
  * hyparquet は BYTE_ARRAY の統計値を文字列として返すが、WKB などのバイナリ列では文字化けするだけなので長さだけ示す。

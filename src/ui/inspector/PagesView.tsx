@@ -2,15 +2,18 @@ import type { Inspection } from '../../inspect'
 import type { ColumnChunkModel } from '../../parquet/model'
 import type { ColumnIndexModel } from '../../parquet/pageIndex'
 import type { ChunkPages, PageModel } from '../../parquet/pages'
-import { chunkKey, useStore } from '../../state/store'
-import { formatBytes, formatNumber, formatPercent, formatRange, formatValue } from '../../util/format'
+import { chunkKey, pageKey, useStore } from '../../state/store'
+import { formatBytes, formatNumber, formatPercent, formatRange, formatValue, rangeSize as size } from '../../util/format'
 import { KV } from '../common/KV'
 import { PageContentSection } from './PageContentView'
 
-const size = (r: { start: number; end: number }) => r.end - r.start
 
 /** 選択中の Column Chunk のページ一覧（読み込み状態も含めて返す） */
-export function useChunkPages(rg: number, col: number) {
+/** ColumnIndex に書かれたそのページの min / max。値がすべて null のページは min/max を持たない */
+const ciText = (ci: ColumnIndexModel | undefined, li: number | undefined) =>
+  li === undefined || !ci ? '-' : ci.nullPages[li] ? 'すべて null' : `${formatValue(ci.min[li])} / ${formatValue(ci.max[li])}`
+
+function useChunkPages(rg: number, col: number) {
   return useStore((s) => s.chunkPages[chunkKey(rg, col)])
 }
 
@@ -70,7 +73,7 @@ export function ChunkPagesSection({ ins, chunk }: { ins: Inspection; chunk: Colu
                 <td>{p.rowCount !== undefined ? formatNumber(p.rowCount) : '-'}</td>
                 <td>{p.header?.numValues !== undefined ? formatNumber(p.header.numValues) : '-'}</td>
                 <td>{formatBytes(size(p.range))}</td>
-                {ci && <td className="mono">{li === undefined ? '-' : ci.nullPages[li] ? 'すべて null' : `${formatValue(ci.min[li])} / ${formatValue(ci.max[li])}`}</td>}
+                {ci && <td className="mono">{ciText(ci, li)}</td>}
               </tr>
             )
           })}
@@ -138,12 +141,12 @@ function PageDetail({ chunk, pages, p, ci }: { chunk: ColumnChunkModel; pages: C
           ...(h?.type === 'DATA_PAGE_V2' ? ([['null の数 / 行数（v2）', `${formatNumber(h.numNulls ?? NaN)} / ${formatNumber(h.numRows ?? NaN)}`], ['is_compressed', String(h.isCompressed)]] as [string, string, string?][]) : []),
           ...(h?.type === 'DICTIONARY_PAGE' ? ([['is_sorted', h.isSorted === undefined ? '-' : String(h.isSorted), '辞書の値が並べ替え済みか']] as [string, string, string?][]) : []),
           ['ページ単位の Statistics', h?.hasStatistics ? 'あり' : 'なし', 'ヘッダ内の統計値。読み飛ばしの判断には、ページを読む前に分かる ColumnIndex を使う'],
-          ['ColumnIndex の min / max', li !== undefined && ci ? (ci.nullPages[li] ? 'すべて null' : `${formatValue(ci.min[li])} / ${formatValue(ci.max[li])}`) : '-'],
+          ['ColumnIndex の min / max', ciText(ci, li)],
           ['CRC', h?.crc !== undefined ? String(h.crc) : 'なし'],
         ]}
       />
       {/* ページごとに作り直す。強調中の区切りや表のページ送りの位置を、別のページに持ち越さないため */}
-      <PageContentSection key={`${chunk.rowGroup}:${chunk.column.index}:${p.index}`} rg={chunk.rowGroup} col={chunk.column.index} pages={pages} p={p} />
+      <PageContentSection key={pageKey(chunk.rowGroup, chunk.column.index, p.index)} rg={chunk.rowGroup} col={chunk.column.index} pages={pages} p={p} />
     </>
   )
 }

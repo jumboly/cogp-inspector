@@ -3,7 +3,7 @@ import { SourceError } from '../io/errors'
 import type { RandomAccessSource } from '../io/source'
 
 /** Parquet ファイル末尾の 8 バイト = footer 長（4B, little endian）+ magic "PAR1" */
-export const TRAILER_LENGTH = 8
+const TRAILER_LENGTH = 8
 const MAGIC_PAR1 = 0x31524150
 const MAGIC_PARE = 0x45524150
 

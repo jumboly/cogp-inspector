@@ -1,5 +1,6 @@
 import type { LevelModel, LodModel } from '../cogp/lod'
 import type { Bbox } from '../geo/bbox'
+import { coveringPaths, isTopLevel } from '../geo/geoMetadata'
 import { intersects, pageBboxesFromCache, pageBboxIndexWants, type PageBboxes, type RowSpan } from '../geo/pageBbox'
 import type { Inspection } from '../inspect'
 import { coalesce } from '../io/coalesce'
@@ -211,7 +212,7 @@ export async function planAccess(ins: Inspection, cache: PageCache, input: PlanI
 export function defaultColumns(ins: Inspection): number[] {
   const primary = ins.geo?.primary
   const cov = primary?.covering
-  const names = new Set([primary?.name, ...(cov ? [cov.xmin, cov.ymin, cov.xmax, cov.ymax].map((p) => p.join('.')) : [])])
-  const picked = ins.file.leafColumns.filter((c) => names.has(c.name) || (c.path.length === 1 && c.path[0] === primary?.name)).map((c) => c.index)
+  const names = new Set([primary?.name, ...(cov ? coveringPaths(cov).map((p) => p.join('.')) : [])])
+  const picked = ins.file.leafColumns.filter((c) => names.has(c.name) || (primary !== undefined && isTopLevel(c.path, primary.name))).map((c) => c.index)
   return picked.length ? picked : ins.file.leafColumns.map((c) => c.index)
 }

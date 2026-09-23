@@ -42,20 +42,10 @@ HTTP Range Request で読めます。
 
 ## 開発ステータス
 
-**Phase 3 完了。** ファイルを開くと Footer だけを読み、Parquet・GeoParquet・COGP の構造を表示します。
-Page・Page Index を必要な分だけ読んで表示し、Access Simulator で地図の表示範囲から読む範囲を推定します。
-推定どおりに実データを読んで描き、推定と実測を突き合わせ、通常の GeoParquet と読む量を比べられます。
+MVP・Phase 2・Phase 3・GeoParquet 2.0・辞書の値と index の表示まで実装済みです（内容は [docs/design.md §6](docs/design.md#6-スコープ)）。
 公開版: <https://www.jumboly.jp/cogp-inspector/>
 
-- [x] 仕様・既存実装・ライブラリの調査（[docs/design.md](docs/design.md)）
-- [x] 基本方針の決定
-- [x] 空のプロジェクト（Vite + React + TypeScript + MapLibre）と GitHub Pages への自動公開設定
-- [x] MVP 実装（ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
-- [x] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
-- [x] Phase 3（実データ描画、Expected vs Actual、診断、比較用サンプルと通常 GeoParquet との比較）
-- [x] GeoParquet 2.0（Parquet ネイティブの GEOMETRY / GEOGRAPHY 型、論理型の crs、日付変更線をまたぐ bbox、2.0 の MUST の診断）
-
-未対応の課題は [docs/issues/](docs/issues/) に下書きし、GitHub Issue として管理します。
+未対応の課題は [docs/issues/](docs/issues/) に下書きしています。
 
 ## 使い方
 
@@ -65,7 +55,7 @@ Page・Page Index を必要な分だけ読んで表示し、Access Simulator で
 | Structure（左） | ファイルの先頭 → 末尾の並びで構造をたどる。Schema・GeoParquet・COGP の情報が末尾の Footer の中にあることが階層で分かる。Column Chunk を開くとページが並ぶ |
 | 地図（中央） | Row Group の bbox を Level の色で描画。表示 Level を選ぶと、その Level で読む prefix（RG 0〜row_group_end）だけを表示し、その Level で増えた Row Group を太線で強調。クリックで Row Group を選択。Row Group を選ぶとページ単位の bbox（Page bbox）も青で描く |
 | Access Simulator（地図の左上） | ON にすると、地図を動かすたびに「Level 選択 → Row Group の絞り込み → Page Index → ページの絞り込み → Range の合体」の順に読む範囲を推定し、Inspector に段階ごとの候補数とバイト数を表示。読む列も選べる。「実データを読む」を ON にすると推定どおりに読んで geometry を描き、推定（Expected）と実測（Actual）を並べる。「比較対象」を開くと、同じ表示範囲での読む量を 2 ファイルで比べる |
-| Inspector（右） | 選んだ要素の詳細と、Parquet / GeoParquet / COGP のどの層の何なのかの解説。Column Chunk ではページ一覧・辞書ページ・ColumnIndex の min/max、Row Group では Page bbox の一覧 |
+| Inspector（右） | 選んだ要素の詳細と、Parquet / GeoParquet / COGP のどの層の何なのかの解説。Column Chunk ではページ一覧・辞書ページ・ColumnIndex の min/max、Row Group では Page bbox の一覧。辞書で符号化されたページでは「中身を読む」で辞書の値・level・index の対応と PLAIN との差を表示 |
 | Physical File Map（下） | ファイル全体のバイト配置（Row Group・Column Chunk・Page・Page Index・Footer）、Simulator が推定した読む予定の範囲、実際に読んだ範囲。ホイールで拡大、ドラッグで移動、クリックで選択 |
 | 診断（ヘッダーの「診断」） | Footer だけから、COGP 仕様の MUST・SHOULD と仕様外の目安を判定。クリックで該当する Row Group などを選ぶ |
 | Range Request 一覧（ヘッダーの「読み込み N 回」） | 実際に読んだ範囲を目的別に集計し、操作ごとのまとまりで時系列（ウォーターフォール）に表示。クリックで Physical File Map にその範囲を示す |
@@ -101,8 +91,7 @@ COGP 公式サンプルから東京 23 区付近の POI（152,127 行）を切�
 COGP を開いて Access Simulator を ON にし、「比較対象」に残りのサンプルを選ぶと、同じ表示範囲で読む量を比べられます。
 データは © OpenStreetMap contributors で、[ODbL](https://opendatacommons.org/licenses/odbl/) のもとで提供されています。
 
-開発サーバーは `samples/` を Range 付きで配信します。公開版は GitHub Pages に置かず、Cloudflare R2 から読みます
-（Pages は `.parquet` を gzip で送り、Range を圧縮後のバイト列に掛けるため、ファイルとして読めなくなります）。
+開発サーバーは `samples/` を Range 付きで配信します。公開版は Cloudflare R2 から読みます（GitHub Pages では Range が壊れるため。design.md D43）。
 配信先はリポジトリ変数 `SAMPLES_BASE` で指定し、ビルド時に `VITE_SAMPLES_BASE` として渡します。未設定ならサンプルのボタンは出ません。
 
 作り直すときは、公式サンプルを `data/` に置き、[cogp v1.0.0](https://github.com/Kanahiro/cloud-optimized-geoparquet/releases/tag/v1.0.0) の CLI を用意して実行します（[uv](https://docs.astral.sh/uv/) が必要）。
@@ -118,7 +107,8 @@ uv run scripts/make_samples.py   # --cogp を省くと、既存の COGP から 2
 npx wrangler r2 object put cogp-inspector-samples/tokyo-id.parquet --file samples/tokyo-id.parquet --remote
 ```
 
-GeoParquet 2.0 の小さなテスト用ファイル（apache/parquet-testing ほか、Apache License 2.0）は `test/fixtures/geo2/` にあります。
+テスト用の小さなファイルは `test/fixtures/` にあります。GeoParquet 2.0 のファイル（`geo2/`、apache/parquet-testing ほか、Apache License 2.0）は公開されているものを写し、
+辞書のファイル（`dictionary/`）は `uv run test/fixtures/make_dictionary.py` で作ります。
 
 開発では COGP 公式サンプル（OSM 由来の POI、約 2.2GB）を `data/` に置いて使います。
 `data/` は Git 管理外です。
@@ -134,7 +124,7 @@ curl -o data/pois.cogp.parquet https://cogp-demo.spatialty.io/v1.0.0/pois.cogp.p
 開発サーバーでは、ヘッダーの「dev サンプル」ボタンで `data/pois.cogp.parquet` を URL（HTTP Range Request）として開けます。
 開発サーバーが `data/` を Range 付きで配信します（`vite.config.ts`）。
 
-公開版（GitHub Pages）からは、公式サンプルの配信サーバーの CORS 設定により URL で直接開けない見込みです。
+公開版（GitHub Pages）からは、公式サンプルの配信サーバーの CORS 設定により URL で直接開けません。
 ダウンロードしたファイルを「ローカルファイルを開く」で読み込んでください（ファイル全体をメモリには読みません）。
 
 ## ライセンス

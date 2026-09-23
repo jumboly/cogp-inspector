@@ -1,4 +1,4 @@
-import type { GeoModel } from '../../geo/geoMetadata'
+import { coveringPaths, type GeoModel } from '../../geo/geoMetadata'
 import type { LeafColumn } from '../../parquet/model'
 
 export type ColumnRole = 'geometry' | 'covering' | 'attribute'
@@ -8,7 +8,7 @@ export function columnRole(col: LeafColumn, geo: GeoModel | undefined): ColumnRo
   if (!geo) return 'attribute'
   if (col.path.length === 1 && geo.columns.some((g) => g.name === col.path[0])) return 'geometry'
   const cov = geo.primary?.covering
-  if (cov && [cov.xmin, cov.ymin, cov.xmax, cov.ymax].some((p) => p.join('.') === col.name)) return 'covering'
+  if (cov && coveringPaths(cov).some((p) => p.join('.') === col.name)) return 'covering'
   return 'attribute'
 }
 

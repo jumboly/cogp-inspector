@@ -1,6 +1,6 @@
 import type { FileModel, RowGroupModel } from '../parquet/model'
 import { mercatorToLonLat, type MapProjection } from './crs'
-import type { GeoModel } from './geoMetadata'
+import { isTopLevel, type GeoModel } from './geoMetadata'
 
 export type Bbox = [xmin: number, ymin: number, xmax: number, ymax: number]
 
@@ -13,9 +13,9 @@ export interface RowGroupBbox {
   note?: string
 }
 
-const samePath = (a: string[], b: string[]) => a.length === b.length && a.every((s, i) => s === b[i])
+export const samePath = (a: string[], b: string[]) => a.length === b.length && a.every((s, i) => s === b[i])
 
-function statNumber(v: unknown): number | undefined {
+export function statNumber(v: unknown): number | undefined {
   if (typeof v === 'number') return v
   if (typeof v === 'bigint') return Number(v)
   return undefined
@@ -40,7 +40,7 @@ export function rowGroupBbox(rg: RowGroupModel, geo: GeoModel | undefined): RowG
     }
   }
   if (primary) {
-    const geomChunk = rg.columns.find((c) => c.column.path.length === 1 && c.column.path[0] === primary.name)
+    const geomChunk = rg.columns.find((c) => isTopLevel(c.column.path, primary.name))
     const b = geomChunk?.raw.meta_data?.geospatial_statistics?.bbox
     if (b) return { bbox: [b.xmin, b.ymin, b.xmax, b.ymax], source: 'geospatial-stats' }
   }

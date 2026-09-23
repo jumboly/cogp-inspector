@@ -4,7 +4,7 @@
 # ///
 """比較用サンプル 4 種類を作る（design.md D43・D49）。
 
-公式サンプル（全世界の POI、COGP）から東京 23 区付近を切り出し、次の 3 つを samples/ に書く。
+公式サンプル（全世界の POI、COGP）から東京 23 区付近を切り出し、次の 4 つを samples/ に書く。
 
 1. tokyo-id.parquet       元の順（id 順）の通常 GeoParquet
 2. tokyo-hilbert.parquet  Hilbert 順の通常 GeoParquet

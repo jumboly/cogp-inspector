@@ -9,6 +9,12 @@ export interface CoveringBbox {
   ymax: string[]
 }
 
+/** covering の 4 列（xmin, ymin, xmax, ymax の順） */
+export const coveringPaths = (cov: CoveringBbox) => [cov.xmin, cov.ymin, cov.xmax, cov.ymax]
+
+/** ジオメトリ列は入れ子にならないので、列パスが名前 1 つだけのものを探す */
+export const isTopLevel = (path: string[], name: string) => path.length === 1 && path[0] === name
+
 export interface GeoColumnModel {
   name: string
   encoding?: string

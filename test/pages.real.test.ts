@@ -17,7 +17,7 @@ describe.skipIf(!existsSync(SAMPLE))('公式サンプルのページ構造', () 
     return { reads, ins, cache: new PageCache(src, ins.file) }
   }
 
-  it('bbox.xmin は OffsetIndex から 23 ページ、各ヘッダ 22B・2,048 値（design.md §3.1 の実測と一致）', async () => {
+  it('bbox.xmin は OffsetIndex から 23 ページ、各ヘッダ 22B・2,048 値（design.md §2.5 の実測と一致）', async () => {
     const { ins, cache } = await setup()
     const chunk = ins.file.rowGroups[2].columns.find((c) => c.column.name === 'bbox.xmin')!
     const p = await cache.pages(chunk)

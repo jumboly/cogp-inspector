@@ -1,5 +1,6 @@
 import { worldWidth, wrapsX, type Bbox } from '../geo/bbox'
 import { sameCrs } from '../geo/crs'
+import { coveringPaths, isTopLevel } from '../geo/geoMetadata'
 import { wkbTypeName } from '../geo/geometryTypes'
 import type { PageBboxes } from '../geo/pageBbox'
 import type { Inspection } from '../inspect'
@@ -7,7 +8,7 @@ import type { Selection } from '../state/store'
 import { formatBytes, formatNumber as fmt } from '../util/format'
 
 /**
- * 「Cloud Optimized と言える構造か」の診断（design.md D41・D42、issue 07）。
+ * 「Cloud Optimized と言える構造か」の診断（design.md D41・D42）。
  * ファイルを開いた時点で読んだ Footer だけから判定する（D15）。Page Index が要る項目は、読むまで「未確認」にする。
  * 仕様の MUST と SHOULD を混ぜないよう、項目を 3 群に分ける。
  */
@@ -56,16 +57,23 @@ function enclose(bs: Bbox[], width?: number): Bbox | undefined {
   return e
 }
 
+// 重なり係数は Level ごとに求めるので、同じファイルで何度も呼ばれる。Row Group 数ぶんの計算を 1 回で済ませる
+const planarCache = new WeakMap<Inspection, (Bbox | undefined)[]>()
+
 /**
  * 面積の計算に使う Row Group の bbox。日付変更線をまたぐ bbox（xmin > xmax）は xmax に一周分を足して幅を正にする（D48）。
  * 一周の幅が分からない CRS でまたいでいる bbox は、面積が求められないので計算から外す
  */
 function planarBboxes(ins: Inspection): (Bbox | undefined)[] {
+  const cached = planarCache.get(ins)
+  if (cached) return cached
   const width = worldWidth(ins.geo?.primary?.crs.mapProjection ?? null)
-  return ins.rowGroupBboxes.map(({ bbox: b }) => {
+  const planar = ins.rowGroupBboxes.map(({ bbox: b }): Bbox | undefined => {
     if (!b || !wrapsX(b)) return b
     return width === undefined ? undefined : [b[0], b[1], b[2] + width, b[3]]
   })
+  planarCache.set(ins, planar)
+  return planar
 }
 
 export interface LevelOverlap {
@@ -137,7 +145,7 @@ function geoParquet2Items(ins: Inspection): DiagItem[] {
   // 型: 全 Row Group の geospatial_types を合わせたものと geometry_types を比べる。
   // geospatial_types が無い・空（＝不明）の Row Group があれば、合わせても全体にならないので未確認にする
   const typeDetails: DiagDetail[] = withLogical.map((c) => {
-    const chunks = file.rowGroups.map((rg) => rg.columns.find((ch) => ch.column.path.length === 1 && ch.column.path[0] === c.name))
+    const chunks = file.rowGroups.map((rg) => rg.columns.find((ch) => isTopLevel(ch.column.path, c.name)))
     const codes = chunks.map((ch) => ch?.raw.meta_data?.geospatial_statistics?.geospatial_types)
     const declared = [...new Set(c.geometryTypes)].sort()
     if (codes.some((t) => !t?.length) || !declared.length) {
@@ -362,7 +370,7 @@ export function diagnose(ins: Inspection, pageBboxOf: (rg: number) => PageBboxes
   })
   const chunks = file.rowGroups.flatMap((r) => r.columns)
   const withOi = chunks.filter((c) => c.offsetIndex).length
-  const covNames = geo?.primary?.covering ? new Set([geo.primary.covering.xmin, geo.primary.covering.ymin, geo.primary.covering.xmax, geo.primary.covering.ymax].map((p) => p.join('.'))) : undefined
+  const covNames = geo?.primary?.covering ? new Set(coveringPaths(geo.primary.covering).map((p) => p.join('.'))) : undefined
   const covChunks = covNames ? chunks.filter((c) => covNames.has(c.column.path.join('.'))) : []
   const covWithCi = covChunks.filter((c) => c.columnIndex).length
   items.push({

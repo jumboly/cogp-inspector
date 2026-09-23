@@ -19,6 +19,9 @@ export function formatPercent(part: number, whole: number): string {
   return `${p < 0.01 && p > 0 ? p.toExponential(1) : p.toFixed(p < 1 ? 3 : 1)} %`
 }
 
+/** 半開区間 [start, end) のバイト数 */
+export const rangeSize = (r: { start: number; end: number }) => r.end - r.start
+
 export const formatRange = (r: { start: number; end: number }) => `${formatNumber(r.start)} – ${formatNumber(r.end - 1)}`
 
 export function formatValue(v: unknown): string {

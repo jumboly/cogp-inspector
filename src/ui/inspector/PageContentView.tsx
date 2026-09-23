@@ -3,13 +3,12 @@ import { hasDictionary, isDictionaryEncoded, type BodySection, type DataPageCont
 import type { HybridRun } from '../../parquet/hybrid'
 import type { ChunkPages, PageModel } from '../../parquet/pages'
 import { pageKey, useStore } from '../../state/store'
-import { formatBytes, formatNumber, formatPercent } from '../../util/format'
+import { formatBytes, formatNumber, formatPercent, rangeSize as size } from '../../util/format'
 import { KV } from '../common/KV'
 
 // 4 万件を超える辞書もあるので、表は一度に 100 行だけ描く（design.md D57）
 const PAGE_SIZE = 100
 
-const size = (r: { start: number; end: number }) => r.end - r.start
 
 /** ページの Inspector に置く「中身を読む」と、その結果（辞書の値・level・index の対応）。design.md D53〜D59 */
 export function PageContentSection({ rg, col, pages, p }: { rg: number; col: number; pages: ChunkPages; p: PageModel }) {

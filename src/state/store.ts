@@ -165,6 +165,31 @@ const abortData = () => {
   dataAbort = undefined
 }
 
+type KeyedField = 'chunkPages' | 'pageContents' | 'pageBboxes'
+type KeyedData<F extends KeyedField> = State[F] extends Record<string | number, Loadable<infer T>> ? T : never
+
+/**
+ * 選んだ分だけ読む読み込み（ページ一覧・ページの中身・Page bbox）の共通の手順。
+ * 読み込み中・読み済みなら読み直さない。読み込み中に別のファイルを開いていたら、古い結果は捨てる（新しいファイルの表示に混ざるため）。
+ */
+function loadKeyed<F extends KeyedField>(
+  get: () => State,
+  set: (patch: Partial<State>) => void,
+  field: F,
+  key: string | number,
+  run: (pageCache: PageCache, inspection: Inspection) => Promise<KeyedData<F>>,
+) {
+  const { pageCache, inspection } = get()
+  const current = (get()[field] as Record<string | number, Loadable<KeyedData<F>>>)[key]
+  if (!pageCache || !inspection || current?.status === 'ready' || current?.status === 'loading') return
+  const put = (v: Loadable<KeyedData<F>>) => set({ [field]: { ...get()[field], [key]: v } } as Partial<State>)
+  put({ status: 'loading' })
+  run(pageCache, inspection).then(
+    (data) => get().pageCache === pageCache && put({ status: 'ready', data }),
+    (e) => get().pageCache === pageCache && put({ status: 'error', error: (e as Error).message }),
+  )
+}
+
 export const useStore = create<State>((set, get) => ({
   status: 'idle',
   reads: [],
@@ -217,50 +242,21 @@ export const useStore = create<State>((set, get) => ({
   setHoverRowGroup: (hoverRowGroup) => set({ hoverRowGroup }),
 
   loadChunkPages(rg, col) {
-    const { pageCache, inspection, chunkPages } = get()
-    const k = chunkKey(rg, col)
-    if (!pageCache || !inspection || chunkPages[k]?.status === 'ready' || chunkPages[k]?.status === 'loading') return
-    const chunk = inspection.file.rowGroups[rg].columns[col]
-    set({ chunkPages: { ...chunkPages, [k]: { status: 'loading' } } })
-    const done = (v: Loadable<ChunkPages>) => {
-      // 読み込み中に別のファイルを開いていたら、古い結果は捨てる
-      if (get().pageCache === pageCache) set({ chunkPages: { ...get().chunkPages, [k]: v } })
-    }
-    pageCache.pages(chunk).then(
-      (data) => done({ status: 'ready', data }),
-      (e) => done({ status: 'error', error: (e as Error).message }),
-    )
+    loadKeyed(get, set, 'chunkPages', chunkKey(rg, col), (pageCache, inspection) => pageCache.pages(inspection.file.rowGroups[rg].columns[col]))
   },
 
   loadPageContent(rg, col, page) {
-    const { pageCache, inspection, pageContents } = get()
-    const k = pageKey(rg, col, page)
-    if (!pageCache || !inspection || pageContents[k]?.status === 'ready' || pageContents[k]?.status === 'loading') return
-    const chunk = inspection.file.rowGroups[rg].columns[col]
-    set({ pageContents: { ...pageContents, [k]: { status: 'loading' } } })
-    const done = (v: Loadable<PageContent>) => {
-      if (get().pageCache === pageCache) set({ pageContents: { ...get().pageContents, [k]: v } })
-    }
-    loadCompressors()
-      .then((compressors) => readPageContent(pageCache, inspection.file.schema, chunk, page, compressors))
-      .then(
-        (data) => done({ status: 'ready', data }),
-        (e) => done({ status: 'error', error: (e as Error).message }),
-      )
+    loadKeyed(get, set, 'pageContents', pageKey(rg, col, page), async (pageCache, inspection) =>
+      readPageContent(pageCache, inspection.file.schema, inspection.file.rowGroups[rg].columns[col], page, await loadCompressors()),
+    )
   },
 
   loadPageBboxes(rg) {
-    const { pageCache, inspection, pageBboxes } = get()
-    if (!pageCache || !inspection || pageBboxes[rg]?.status === 'ready' || pageBboxes[rg]?.status === 'loading') return
-    const model = inspection.file.rowGroups[rg]
-    set({ pageBboxes: { ...pageBboxes, [rg]: { status: 'loading' } } })
-    const done = (v: Loadable<PageBboxes>) => {
-      if (get().pageCache === pageCache) set({ pageBboxes: { ...get().pageBboxes, [rg]: v } })
-    }
-    pageCache.loadIndexes(pageBboxIndexWants(model, inspection.geo)).then(
-      () => done({ status: 'ready', data: pageBboxesFromCache(pageCache, model, inspection.geo) }),
-      (e) => done({ status: 'error', error: (e as Error).message }),
-    )
+    loadKeyed(get, set, 'pageBboxes', rg, async (pageCache, { file, geo }) => {
+      const model = file.rowGroups[rg]
+      await pageCache.loadIndexes(pageBboxIndexWants(model, geo))
+      return pageBboxesFromCache(pageCache, model, geo)
+    })
   },
   setHoverSpan: (hoverSpan) => set({ hoverSpan }),
 

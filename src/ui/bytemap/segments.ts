@@ -3,7 +3,7 @@ import type { Inspection } from '../../inspect'
 import type { ByteRange } from '../../parquet/model'
 import type { ChunkPages } from '../../parquet/pages'
 import type { ReadRecord } from '../../io/source'
-import type { Loadable, Selection } from '../../state/store'
+import { chunkKey, type Loadable, type Selection } from '../../state/store'
 import { levelColor, NEUTRAL } from '../../util/color'
 import { columnRole, type ColumnRole } from '../inspector/columnRole'
 
@@ -55,7 +55,7 @@ export function buildSegments(ins: Inspection): Segment[] {
 }
 
 export const DICT_COLOR = '#8e6c8a'
-export const HEADER_COLOR = '#222'
+const HEADER_COLOR = '#222'
 
 /**
  * 読み込み済みの Column Chunk のページ。ページ本体の上に、先頭のページヘッダを重ねて描く
@@ -79,7 +79,7 @@ export function pageSegments(ins: Inspection, chunkPages: Record<string, Loadabl
 }
 
 /** 選択に対応するファイル内の範囲。Level は「RG 0 から row_group_end まで」の連続範囲（prefix）になる */
-export function selectionRange(ins: Inspection, sel: Selection | null, chunkPages?: Record<string, Loadable<ChunkPages>>, reads?: ReadRecord[]): ByteRange | undefined {
+export function selectionRange(ins: Inspection, sel: Selection | null, chunkPages: Record<string, Loadable<ChunkPages>>, reads: ReadRecord[]): ByteRange | undefined {
   if (!sel) return undefined
   const { file, lod } = ins
   switch (sel.kind) {
@@ -88,7 +88,7 @@ export function selectionRange(ins: Inspection, sel: Selection | null, chunkPage
     case 'column':
       return file.rowGroups[sel.rg].columns[sel.col].range
     case 'page': {
-      const st = chunkPages?.[`${sel.rg}:${sel.col}`]
+      const st = chunkPages[chunkKey(sel.rg, sel.col)]
       return st?.status === 'ready' ? st.data.pages[sel.page]?.range : file.rowGroups[sel.rg].columns[sel.col].range
     }
     case 'footer':
@@ -105,7 +105,7 @@ export function selectionRange(ins: Inspection, sel: Selection | null, chunkPage
     case 'plan':
       return undefined
     case 'reads': {
-      const r = sel.id === undefined ? undefined : reads?.find((x) => x.id === sel.id)
+      const r = sel.id === undefined ? undefined : reads.find((x) => x.id === sel.id)
       return r && { start: r.offset, end: r.offset + r.length }
     }
     case 'level': {
