@@ -14,4 +14,4 @@
 - 「空間的なまとまり」の評価指標（Row Group bbox の重なり率など）
 
 ## 結論
-（未定）Phase 3。
+Phase 3 段階 D（design.md D41・D42）。Inspector の「診断」タブで Footer だけから判定し、MUST / SHOULD / 目安の 3 群に分ける。空間的なまとまりは Level ごとの重なり係数（bbox 面積の合計 ÷ 合わせた範囲の面積）を合否なしで表示。

@@ -1,6 +1,6 @@
 # 設計メモ
 
-2026-09-23 時点の調査結果と決定事項。MVP・Phase 2 は実装済み（実装時の判断は §3.2・§3.3）。
+2026-09-23 時点の調査結果と決定事項。MVP・Phase 2 は実装済み（実装時の判断は §3.2・§3.3）。Phase 3 は設計のみ決定済み（§3.4）。
 推測を含む箇所は【推測】と明記する。
 
 ## 1. 目的と設計の優先順位
@@ -192,6 +192,29 @@ D14〜D22 はユーザーと 1 問ずつ議論して決定。D23 以降は「以
   160 ページ範囲が合体して 95 回の Range Request。Page Index の読み込みは 16 回（132 件を合体）。
 - 地図を続けて動かしたときは通し番号で古い計算結果を捨てる。列を変えたら最後の表示範囲で計算し直す。
 
+### 3.4 Phase 3 の判断（2026-09-23、設計のみ・未実装）
+
+D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以降もおすすめで進めて」の指示のもとおすすめ案で決定。
+
+| # | 論点 | 決定 | 理由 |
+|---|---|---|---|
+| D30 | 作る順番 | A. 実データ描画 → B. progressive rendering → C. Expected vs Actual → D. 診断 → E. サンプル生成と通常 GeoParquet との比較。段階ごとに commit + push | A→B→C は一直線に依存する。D は Footer だけで作れ後でも手戻りがない。E はサンプル生成（issue 01）の判断をまとめて最後に行う |
+| D31 | decode の方法 | Access Plan で決めたページを自前の read で読み、展開・decode だけ hyparquet の関数（`decompressPage`・`readDataPage`・`wkbToGeojson` など）を使う。`parquetRead` の filter / `usePageIndex` は使わない | 処理の流れが Phase 2 の Access Plan の続きになり、Page Index のキャッシュも共有できる。hyparquet は Level を知らず Index を読み直し合体方針も違うため、差の原因が混ざる |
+| D32 | 読み始める時機 | Simulator に「実データを読む」の ON/OFF（既定 OFF）。ON の間は移動が止まるたびに計画 → 読み込み → decode → 描画まで自動で進む | D19 の「動かすと読む範囲が変わる」を実データでも体験させつつ、Simulator を ON にしただけで大量の通信が起きないようにする |
+| D33 | 読む量の上限 | 推定バイト数（選んだ列）が 20MB を超えたら読まず、funnel にその旨を出す。読み込み中に地図を動かしたら古い読み込みを `AbortSignal` で中断する | 読む前に Expected で量が分かるのでそこで止められる。20MB は東京の例（約 2.7MB）の 7 倍の余裕。古い計算を捨てる方針（段階 C）を通信にも広げる |
+| D34 | 展開ライブラリ | `hyparquet-compressors`（fzstd + hysnappy）を追加し、「実データを読む」を初めて ON にしたときに dynamic import する | cogp-js と同じ構成。ZSTD 以外の codec のファイルも開ける。初期表示のバンドル（約 76KB gzip）を増やさない |
+| D35 | 描画に使う列 | geometry 列（WKB）を decode して描く。読む列から geometry を外したときは描かず「geometry を読んでいないので描けない」と表示する（bbox 列から代わりに描くことはしない） | 「描くには geometry 列が要る・要らない列は読まない」という列指向の関係をそのまま見せる |
+| D36 | 行単位の判定 | decode 後に各行の geometry の bbox を表示範囲と比べ、範囲内の行は濃く、範囲外の行（読んだが捨てる行）は薄い灰色で描く。行数も「読んだ行 / 範囲内の行」で出す | ページ単位の pruning は保守的で範囲外の行も読むことが見える。cogp-js の「行単位判定」に当たる段を funnel に 1 段足す |
+| D37 | 地図への描き方 | MapLibre の GeoJSON source に点・線・面の layer を 1 組。色は行が属する Level（その Row Group が加わった Level）で塗り分ける。decode はメインスレッドで、ページごとに処理を区切って描画を止めない | 追加の描画ライブラリが要らない。Level の色分けで prefix 構造（粗い Level の点が細かい Level に引き継がれる）が実データで見える。東京の例（数万行）ならワーカーは不要【推測】。遅ければ後で Web Worker に移す |
+| D38 | progressive rendering | 合体後の Range をファイル順（= 粗い Level → 細かい Level の順）に同時 6 本（既存の `READ_CONCURRENCY`）で発行し、読み終わった Range から decode して描き足す。新しい計画の最初の描画まで前回の描画を残す。進み具合（読んだ Range 数 / 全体）を funnel に出す | COGP ではファイル順が粗い順なので、先に粗い全体像が出て細部が後から埋まる様子がそのまま現れる。D29 のウォーターフォールで並列の様子も見える |
+| D39 | Expected vs Actual の単位 | 1 回の計画（地図の移動 1 回分）ごとに、Access Plan に Expected・Actual・差の 3 列を出す。比べる項目: Range Request 数、バイト数（目的別）、行数（読んだ行 / 範囲内の行）、所要時間 | D23 で分けておいた推定と実測を、同じ funnel の上で突き合わせる |
+| D40 | 差の分類 | Actual の各 read を Expected の Range と照合し「予定どおり / 予定外（Expected に無い read）/ 未読（中断などで読まなかった予定）」に分ける。Physical File Map の「読む予定」の段の下に「実際に読んだ」の段を並べる | 自前で読むので通常はほぼ一致する。一致しないときに理由（中断・Index の追加読み込みなど）がすぐ分かるようにする。「予定どおり」が並ぶこと自体が推定の正しさの確認になる |
+| D41 | 診断の置き場所と判定の材料 | Inspector に「診断」タブを追加し、ファイルを開いた時点で Footer だけから判定する。MUST・SHOULD・仕様外の目安の 3 群に分け、各項目に根拠の値を出し、クリックで該当する Row Group などを選ぶ。Page Index が要る項目（ページ境界がそろっているか等）は「未確認」とし、その Row Group を選んで Index を読んだ後に判定する | 「開くときは Footer だけ」（D15）を守る。MUST と SHOULD を混ぜない（issue 07）。D7 の Selection に乗せ、新しいペインは作らない |
+| D42 | 空間的なまとまりの指標 | Level ごとに「その Level で加わった Row Group の bbox 面積の合計 ÷ それらの bbox を合わせた範囲の面積」を重なり係数として出す。合否は付けず、1 に近いほど重なりが少ないと説明する | Footer の統計値だけで計算できる。閾値には根拠が無いので決めず、E の比較で元の順・Hilbert 順・COGP の値を並べて意味を読ませる |
+| D43 | 比較用サンプル（issue 01） | 公式サンプルから 1 地域を切り出し、同じ行・同じ列・同じ圧縮・同じ Row Group の大きさ・Page Index ありで 3 種類作る: (1) 元の順（id 順）の通常 GeoParquet、(2) Hilbert 順の通常 GeoParquet、(3) cogp-rs で作った COGP。各 20MB 以下を目安とし、生成スクリプトを `scripts/` に置いて出力を `public/samples/` にコミットする。ライセンスは元データの表記を README とサンプルの説明に書く | (1)と(2)の差で「空間的にまとめる」効果、(2)と(3)の差で「Level がある」効果が分かれて見える（§1 の問いに対応）。20MB 以下なら Git に直接置いても重くない。公開版で CORS を気にせず開ける |
+| D44 | 比較の UI | 開いているファイルとは別に「比較対象」を 1 つ開く（Footer と Page Index だけ読む）。同じ表示範囲で両方に Access Plan を計算し、funnel を横に並べる。値は「現在の表示範囲」と「Simulator を ON にしてからの累計」の 2 通り。実データを読むのは主ファイルだけ | issue 06 の未決事項（単位・2 ファイルの UI）への答え。地図・ツリー・Physical File Map は主ファイルのまま変えず、変更を funnel に閉じ込める。比較対象の実データまで読むと通信量が倍になるため |
+| D45 | 公開版の入口 | ファイルを開く画面に「サンプルを開く（元の順 / Hilbert 順 / COGP）」ボタンを置き、COGP を開くと他の 2 つを比較対象に選べるようにする | 公開版ですぐ試せる入口が無いという issue 01 の問題を解く |
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
@@ -245,4 +268,4 @@ cogp-inspector/
   GeoParquet メタデータ、`geo.lod` 解析、Level 一覧、Level と Row Group の対応、Row Group bbox の地図描画、
   Row Group Inspector、Physical File Map 基本版
 - Phase 2（実装済み）: Column Chunk 詳細、Page、Dictionary、Page Index、Page bbox、Page pruning、Access Simulator、Range Request 可視化
-- Phase 3: 実データ描画、progressive rendering、Expected vs Actual 比較、通常 GeoParquet との比較、診断
+- Phase 3（設計済み・§3.4）: 実データ描画、progressive rendering、Expected vs Actual 比較、診断、比較用サンプルの生成と通常 GeoParquet との比較
