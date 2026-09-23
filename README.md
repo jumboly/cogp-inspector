@@ -42,24 +42,25 @@ HTTP Range Request で読めます。
 
 ## 開発ステータス
 
-**設計段階（コードはまだありません）。**
+**MVP 着手前。** 画面の枠組みと地図表示だけがある状態です（Parquet の読み込みは未実装）。
 
 - [x] 仕様・既存実装・ライブラリの調査（[docs/design.md](docs/design.md)）
 - [x] 基本方針の決定
+- [x] 空のプロジェクト（Vite + React + TypeScript + MapLibre）と GitHub Pages への自動公開設定
 - [ ] MVP 実装（プロジェクト作成、ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
 - [ ] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
 - [ ] Phase 3（実データ描画、比較、診断）
 
 未対応の課題は [docs/issues/](docs/issues/) に下書きし、GitHub Issue として管理します。
 
-## 起動方法（予定）
+## 起動方法
 
-MVP 実装後に以下の形で起動できるようにする予定です。
+Node.js 20 以上が必要です。
 
 ```sh
 npm install
 npm run dev     # http://localhost:5173
-npm run build   # GitHub Pages 用の静的ファイルを dist/ に出力
+npm run build   # 静的ファイルを dist/ に出力（main への push で GitHub Pages に自動公開）
 ```
 
 ### サンプルデータ

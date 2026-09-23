@@ -3,3 +3,5 @@
 node_modules/
 dist/
 .DS_Store
+# tsc -b の増分ビルド情報。環境ごとに変わるので共有しない
+*.tsbuildinfo

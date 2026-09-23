@@ -1,0 +1,101 @@
+:root {
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --border: #d9d9de;
+  --text: #1d1d22;
+  --muted: #6b6b76;
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+  font-size: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161a;
+    --panel: #1f1f24;
+    --border: #34343c;
+    --text: #e6e6ea;
+    --muted: #9a9aa6;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: grid;
+  height: 100%;
+  grid-template-columns: 260px 1fr 320px;
+  grid-template-rows: auto 1fr 160px;
+  grid-template-areas:
+    'header header header'
+    'structure map inspector'
+    'bytemap bytemap bytemap';
+}
+
+.app-header {
+  grid-area: header;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.pane {
+  overflow: auto;
+  padding: 8px 12px;
+  background: var(--panel);
+}
+
+.pane h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.pane-structure {
+  grid-area: structure;
+  border-right: 1px solid var(--border);
+}
+
+.pane-inspector {
+  grid-area: inspector;
+  border-left: 1px solid var(--border);
+}
+
+.pane-bytemap {
+  grid-area: bytemap;
+  border-top: 1px solid var(--border);
+}
+
+.pane-map {
+  grid-area: map;
+  position: relative;
+  min-width: 0;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+.muted {
+  color: var(--muted);
+}
