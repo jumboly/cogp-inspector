@@ -1,0 +1,5 @@
+# 大容量サンプル（2GB超）はハードリンクで配置し、Git には含めない
+/data/
+node_modules/
+dist/
+.DS_Store

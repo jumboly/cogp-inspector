@@ -1,0 +1,83 @@
+# cogp-inspector
+
+COGP（Cloud Optimized GeoParquet）が Parquet / GeoParquet の仕組みをどう使って
+「クラウド最適化」を実現しているのかを、視覚的・対話的に理解するための Inspector（検査ツール）です。
+
+単なる GeoParquet ビューアではありません。
+
+```text
+Parquet → GeoParquet → COGP
+```
+
+の各層の構造と、それが地図表示・空間検索・HTTP Range Request（ファイルの一部だけを取得する通信）に
+どうつながるのかを見せることを目的にしています。
+
+> 最終目標: MapLibre で地図をズーム・パンすると、COGP ファイルのどの Level・Row Group・Page・Column・
+> byte range が必要になるのかが見て分かる。
+
+## COGP とは
+
+COGP は GeoParquet の上に「Level of Detail（詳細度の段階）」を足す拡張です
+（仕様: [Kanahiro/cloud-optimized-geoparquet](https://github.com/Kanahiro/cloud-optimized-geoparquet) v1.0.0）。
+
+- `geo` メタデータの `lod.levels` に、粗い順から細かい順の Level を並べる
+- 各 Level は `row_group_end` までの **Row Group の先頭からの連続範囲（prefix）** を読む
+  - Level 0 → RG0、Level 1 → RG0〜RG2、Level 2 → RG0〜RG5 …のように、後の Level は前の Level に行を足していく
+- `resolution` はその Level が想定する解像度（主ジオメトリ列の CRS の座標単位）
+- 各 Level で新しく入る行は、Row Group 単位で空間的にまとめて並べる（推奨）
+
+これにより、広域表示では先頭の小さな Row Group だけを、拡大表示では必要な範囲の Row Group だけを
+HTTP Range Request で読めます。
+
+## このツールで可視化するもの
+
+| 層 | 見せるもの |
+|---|---|
+| Parquet | Footer（末尾のメタデータ）、Schema（列定義）、Row Group（行のまとまり）、Column Chunk（列ごとのデータ塊）、Page、圧縮形式、エンコーディング、統計値、Page Index（ページ単位の索引）、byte offset |
+| GeoParquet | `geo` メタデータ、geometry 列、CRS（座標参照系）、bbox covering（外接矩形の列）、Raw JSON |
+| COGP | Level と resolution、Level と Row Group の prefix 構造、Row Group の空間的なまとまり |
+| アクセス | 地図の表示範囲から読むべき byte range の推定（Expected）と、実際の読み込み記録（Actual） |
+
+詳しい設計は [docs/design.md](docs/design.md) を参照してください。
+
+## 開発ステータス
+
+**設計段階（コードはまだありません）。**
+
+- [x] 仕様・既存実装・ライブラリの調査（[docs/design.md](docs/design.md)）
+- [x] 基本方針の決定
+- [ ] MVP 実装（プロジェクト作成、ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
+- [ ] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
+- [ ] Phase 3（実データ描画、比較、診断）
+
+未対応の課題は [docs/issues/](docs/issues/) に下書きし、GitHub Issue として管理します。
+
+## 起動方法（予定）
+
+MVP 実装後に以下の形で起動できるようにする予定です。
+
+```sh
+npm install
+npm run dev     # http://localhost:5173
+npm run build   # GitHub Pages 用の静的ファイルを dist/ に出力
+```
+
+### サンプルデータ
+
+開発では COGP 公式サンプル（OSM 由来の POI、約 2.2GB）を `data/` に置いて使います。
+`data/` は Git 管理外です。
+
+```sh
+mkdir -p data
+# 既に手元にある場合はハードリンク（ディスクを消費しない）
+ln /path/to/pois.cogp.parquet data/pois.cogp.parquet
+# 無い場合はダウンロード
+curl -o data/pois.cogp.parquet https://cogp-demo.spatialty.io/v1.0.0/pois.cogp.parquet
+```
+
+公開版（GitHub Pages）からは、公式サンプルの配信サーバーの CORS 設定により URL で直接開けない見込みです。
+ダウンロードしたファイルを「ローカルファイルを開く」で読み込んでください（ファイル全体をメモリには読みません）。
+
+## ライセンス
+
+未定
