@@ -324,7 +324,7 @@ D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「お
 | D48 | 日付変更線と GEOGRAPHY | xmin > xmax の bbox は [xmin, 180] と [-180, xmax] の 2 つに分け、描画にも絞り込みにも使う（どちらかに重なれば重なる）。GEOGRAPHY の bbox は統計の値をそのまま使い、実データの線と面は平面のまま描いて注記を出す | 太平洋をまたぐデータでも絞り込みを効かせる。GEOGRAPHY の bbox は書き手が辺を考えて求める |
 | D49 | サンプル | (a) テスト用に apache/parquet-testing の geospatial のサンプル（geo なし・srid・projjson・GEOGRAPHY）と geoparquet の example.parquet を `test/fixtures/` に置く。(b) `make_samples.py` で東京の COGP を論理型で書き直した版（geo 2.0.0・lod・covering を残し、行の順と Row Group は同じ）を作り、公開版では 4 つ目のサンプルとして R2 に置く | (a) は小さく、表記のばらつきを網羅できる。(b) で「2.0 の COGP」を実際に試せ、1.1 版と同じ条件で比べられる |
 | D50 | geometry 列の統計 | 通常の min/max と ColumnIndex の値は表示するが判定に使わない。`geospatial_statistics` の bbox と `geospatial_types`（ISO WKB の番号を名前にする）を Column Chunk の Inspector に出す | 仕様が reader に無視を求めている。表示は残して「書かれているが使わない」ことを見せる |
-| D51 | 診断に足す項目 | MUST: 論理型と geo の CRS が一致、`geometry_types` と `geospatial_types` が一致、version 2.x なら geometry 列が論理型。geo が無いファイルは注意を出す | 2.0 で増えた MUST をそのまま確かめる |
+| D51 | 診断に足す項目 | MUST: 論理型と geo の CRS が一致、`geometry_types` と `geospatial_types` が一致、version 2.x なら geometry 列が論理型。geo が無いファイルは注意を出す（実装時に MUST 違反へ改めた。段階 C の実装メモ） | 2.0 で増えた MUST をそのまま確かめる |
 | D52 | 作る順番 | A. GeoModel の統合（D46・D47・D50）→ B. 日付変更線（D48）→ C. 診断（D51）→ D. サンプルとテスト（D49）。段階ごとに commit + push | A が他のすべての土台。サンプルは作りながら手元の fixture で確かめ、最後に公開用をそろえる |
 
 実装メモ（段階 A）:
@@ -345,6 +345,17 @@ D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「お
 - 診断の面積（重なり係数・Level 0 がデータ全体の範囲の何 % を覆うか）は、またぐ bbox の xmax に一周分（360° または 2 × 20,037,508 m）を足して計算する。合わせた範囲は一周で止める。一周の幅が分からない CRS でまたぐ bbox は、計算から外す。
 - GEOGRAPHY の列を描いたときは、funnel の「6. 読んで decode する」の注記に「辺は本来は球面上の曲線だが、直線で結んで描いている」と足した。Row Group の bbox がまたぐときは、Row Group の Inspector に読み方を添える。
 - 日付変更線をまたぐ実ファイルは、手元の fixture には無い。確かめたのは作った値のテストだけで、実ファイルでの確認は段階 D に回す。
+
+実装メモ（段階 C）:
+
+- 診断に MUST を 3 つ足した（`geoParquet2Items`）。geo と論理型の両方があるときだけ比べ、geo が無ければ 3 つとも対象外にする。
+  - crs: 論理型と geo の crs を識別子で比べる（`sameCrs`）。PROJJSON に id が無いなど、比べようがなければ未確認にする。
+  - 型: 全 Row Group の `geospatial_types` を合わせて名前にし、`geometry_types` と集合として比べる。`geometry_types` が空（型を指定しない）ときや、型の統計が無い Row Group があるときは未確認にする。
+  - 論理型: version が 2.x なら、geo の全列が論理型か。1.x では対象外。
+- D51 の「geo が無いファイルは注意を出す」を改め、「GeoParquet に準拠する」の MUST 違反にした。2.0 でも geo は MUST なので、注意にするとヘッダの要約が「MUST OK」になり、実際と合わないため。
+  論理型だけのファイルを 2.0 の reader が読めることと、COGP になり得ないこと（lod は geo に置く）は、注記に書いた。
+- ブラウザで確かめた結果: `crs-default.parquet`（geo なし）は「MUST 違反 1」、geoparquet の `example.parquet` は 2.0 の 3 項目とも満たし「MUST OK」。
+- なお、このプロジェクトに linter は無い。確認は `tsc -b`・vitest・`vite build` で行う。
 
 ## 4. アーキテクチャ（MVP で実装済み）
 

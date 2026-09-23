@@ -1,4 +1,6 @@
 import { worldWidth, wrapsX, type Bbox } from '../geo/bbox'
+import { sameCrs } from '../geo/crs'
+import { wkbTypeName } from '../geo/geometryTypes'
 import type { PageBboxes } from '../geo/pageBbox'
 import type { Inspection } from '../inspect'
 import type { Selection } from '../state/store'
@@ -92,6 +94,95 @@ function overlapOf(ins: Inspection, from: number, to: number): { withBbox: numbe
   return { withBbox: bs.length, coefficient: total > 0 ? bs.reduce((a, b) => a + area(b), 0) / total : undefined }
 }
 
+/**
+ * GeoParquet 2.0 で増えた MUST（design.md D51）。geo と論理型の両方があるときだけ比べられる。
+ * geo の無いファイルは「GeoParquet に準拠する」で違反として出すので、ここでは対象外にする
+ */
+function geoParquet2Items(ins: Inspection): DiagItem[] {
+  const { geo, file } = ins
+  const title = { crs: '論理型と geo の crs が同じ CRS', types: 'geometry_types と geospatial_types が一致', native: 'version 2.x なら geometry 列は GEOMETRY / GEOGRAPHY 論理型' }
+  if (!geo?.hasGeo) {
+    const value = !geo ? 'ジオメトリ列がありません' : 'geo メタデータが無いので比べられません'
+    return [
+      { id: 'geo2-crs', group: 'must', title: title.crs, verdict: 'na', value },
+      { id: 'geo2-types', group: 'must', title: title.types, verdict: 'na', value },
+      { id: 'geo2-native', group: 'must', title: title.native, verdict: 'na', value },
+    ]
+  }
+  const withLogical = geo.columns.filter((c) => c.logical)
+
+  // CRS: 識別子で比べる。PROJJSON に id が無いなど、比べようがなければ未確認
+  const crsDetails: DiagDetail[] = withLogical.map((c) => {
+    const same = c.geoCrs ? sameCrs(c.logical!.crs, c.geoCrs) : undefined
+    return {
+      label: c.name,
+      value: `論理型 ${c.logical!.crs.label} / geo ${c.geoCrs?.label ?? '-'}`,
+      verdict: same === undefined ? 'unknown' : same ? 'ok' : 'ng',
+      target: { kind: 'geo' },
+    }
+  })
+  const crsItem: DiagItem = !withLogical.length
+    ? { id: 'geo2-crs', group: 'must', title: title.crs, verdict: 'na', value: '論理型の geometry 列がありません（GeoParquet 1.x の書き方）' }
+    : {
+        id: 'geo2-crs',
+        group: 'must',
+        title: title.crs,
+        verdict: worst(crsDetails.map((d) => d.verdict!)),
+        value: crsDetails.map((d) => `${d.label}: ${d.verdict === 'ok' ? '同じ' : d.verdict === 'ng' ? '食い違う' : '比べられない'}`).join('、'),
+        note: 'CRS の正は論理型の crs。地図の投影と resolution の単位には論理型を使う。識別子（EPSG:4326 など）が無い PROJJSON は比べられないので未確認にする',
+        target: { kind: 'geo' },
+        details: crsDetails,
+      }
+
+  // 型: 全 Row Group の geospatial_types を合わせたものと geometry_types を比べる。
+  // geospatial_types が無い・空（＝不明）の Row Group があれば、合わせても全体にならないので未確認にする
+  const typeDetails: DiagDetail[] = withLogical.map((c) => {
+    const chunks = file.rowGroups.map((rg) => rg.columns.find((ch) => ch.column.path.length === 1 && ch.column.path[0] === c.name))
+    const codes = chunks.map((ch) => ch?.raw.meta_data?.geospatial_statistics?.geospatial_types)
+    const declared = [...new Set(c.geometryTypes)].sort()
+    if (codes.some((t) => !t?.length) || !declared.length) {
+      return { label: c.name, value: `geometry_types ${declared.join(', ') || '（指定なし）'} / geospatial_types が無い Row Group がある`, verdict: 'unknown' as const, target: { kind: 'geo' } }
+    }
+    const actual = [...new Set(codes.flatMap((t) => t!.map(wkbTypeName)))].sort()
+    const same = actual.length === declared.length && actual.every((t, i) => t === declared[i])
+    return { label: c.name, value: `geometry_types ${declared.join(', ')} / geospatial_types ${actual.join(', ')}`, verdict: same ? ('ok' as const) : ('ng' as const), target: { kind: 'geo' } }
+  })
+  const typesItem: DiagItem = !withLogical.length
+    ? { id: 'geo2-types', group: 'must', title: title.types, verdict: 'na', value: '論理型の geometry 列がありません（GeoParquet 1.x の書き方）' }
+    : {
+        id: 'geo2-types',
+        group: 'must',
+        title: title.types,
+        verdict: worst(typeDetails.map((d) => d.verdict!)),
+        value: typeDetails.map((d) => d.value).join('、'),
+        note: 'geospatial_types は全 Row Group の分を合わせて比べる。geometry_types が空（型を指定しない）ときや、型の統計が無い Row Group があるときは未確認にする',
+        target: { kind: 'geo' },
+        details: typeDetails.length > 1 ? typeDetails : undefined,
+      }
+
+  const is2 = geo.version?.startsWith('2.') ?? false
+  const notNative = geo.columns.filter((c) => !c.logical).map((c) => c.name)
+  const nativeItem: DiagItem = !is2
+    ? { id: 'geo2-native', group: 'must', title: title.native, verdict: 'na', value: `geo ${geo.version ?? '(version なし)'} なので対象外（1.x では通常の BYTE_ARRAY 列でよい）` }
+    : {
+        id: 'geo2-native',
+        group: 'must',
+        title: title.native,
+        verdict: notNative.length ? 'ng' : 'ok',
+        value: notNative.length ? `論理型の無い列: ${notNative.join(', ')}` : `${fmt(geo.columns.length)} 列すべて論理型`,
+        note: 'GeoParquet 2.0 では geometry 列を Parquet ネイティブの GEOMETRY / GEOGRAPHY 論理型で書く MUST がある',
+        target: { kind: 'geo' },
+      }
+  return [crsItem, typesItem, nativeItem]
+}
+
+/** 詳細の判定をまとめる。1 つでも違反なら違反、未確認があれば未確認 */
+function worst(vs: Verdict[]): Verdict {
+  if (vs.includes('ng')) return 'ng'
+  if (vs.includes('unknown')) return 'unknown'
+  return 'ok'
+}
+
 /** Level ごとの重なり係数。Footer の Row Group 統計だけで計算できる */
 export function levelOverlaps(ins: Inspection): LevelOverlap[] {
   return (ins.lod?.levels ?? []).map((l) => ({
@@ -128,7 +219,18 @@ export function diagnose(ins: Inspection, pageBboxOf: (rg: number) => PageBboxes
   items.push(
     !geo
       ? { id: 'geoparquet', group: 'must', title: 'GeoParquet に準拠する', verdict: 'ng', value: 'geo メタデータがありません', note: 'COGP は GeoParquet の拡張なので、geo メタデータが要る', target: { kind: 'file' } }
-      : {
+      : !geo.hasGeo
+        ? {
+            id: 'geoparquet',
+            group: 'must',
+            title: 'GeoParquet に準拠する',
+            // 2.0 でも geo は MUST なので違反として出す。ただし論理型だけのファイルは 2.0 の reader が読めるとされ、地図や Simulator は動く（D46）
+            verdict: 'ng',
+            value: `geo メタデータがありません（論理型の geometry 列 ${geo.columns.map((c) => c.name).join(', ')} はある）`,
+            note: 'GeoParquet 2.0 に準拠しないが、2.0 の reader は論理型だけのファイルも読めるとされる。COGP の lod は geo に置くので、このファイルは COGP になり得ない',
+            target: { kind: 'geo' },
+          }
+        : {
           id: 'geoparquet',
           group: 'must',
           title: 'GeoParquet に準拠する',
@@ -138,6 +240,7 @@ export function diagnose(ins: Inspection, pageBboxOf: (rg: number) => PageBboxes
           target: { kind: 'geo' },
         },
   )
+  items.push(...geoParquet2Items(ins))
   if (!lod) {
     items.push({ id: 'lod', group: 'must', title: 'geo.lod の境界条件', verdict: 'na', value: 'geo.lod がありません（通常の GeoParquet）', note: 'lod が無ければ COGP の MUST は対象外。リーダーは通常の GeoParquet として読む' })
   } else {

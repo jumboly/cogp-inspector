@@ -1,7 +1,7 @@
 import { compressors } from 'hyparquet-compressors'
 import { describe, expect, it } from 'vitest'
 import { readPlanData, type DecodedFeature } from '../src/data/readData'
-import { fileOverlap } from '../src/diagnose/diagnose'
+import { diagnose, fileOverlap } from '../src/diagnose/diagnose'
 import { toLonLatBbox, type Bbox } from '../src/geo/bbox'
 import { describeLogicalCrs, sameCrs } from '../src/geo/crs'
 import { wkbTypeName } from '../src/geo/geometryTypes'
@@ -121,5 +121,29 @@ describe('日付変更線をまたぐ bbox（xmin > xmax、D48）', () => {
     } as unknown as Inspection
     // 面積の合計 20×20 + 10×20 = 600、合わせた範囲 20×20 = 400
     expect(fileOverlap(ins).coefficient).toBeCloseTo(1.5)
+  })
+})
+
+describe('GeoParquet 2.0 の診断（D51）', () => {
+  const verdicts = (ins: Inspection) => Object.fromEntries(diagnose(ins, () => undefined).map((d) => [d.id, d.verdict]))
+
+  it('geo と論理型がそろったファイルは 2.0 の MUST をすべて満たす', async () => {
+    const v = verdicts((await open('geoparquet-example.parquet')).ins)
+    expect(v).toMatchObject({ geoparquet: 'ok', 'geo2-crs': 'ok', 'geo2-types': 'ok', 'geo2-native': 'ok' })
+  })
+
+  it('geo が無いファイルは GeoParquet の MUST 違反とし、2.0 の比較は対象外にする', async () => {
+    const v = verdicts((await open('crs-default.parquet')).ins)
+    expect(v).toMatchObject({ geoparquet: 'ng', 'geo2-crs': 'na', 'geo2-types': 'na', 'geo2-native': 'na' })
+  })
+
+  it('論理型と geo の crs の食い違い、型の食い違いを違反にする', async () => {
+    const { ins } = await open('geoparquet-example.parquet')
+    const p = ins.geo!.primary!
+    const broken = {
+      ...ins,
+      geo: { ...ins.geo!, columns: [{ ...p, geometryTypes: ['Point'], logical: { ...p.logical!, crs: describeLogicalCrs('EPSG:3857', []) } }] },
+    } as Inspection
+    expect(verdicts(broken)).toMatchObject({ 'geo2-crs': 'ng', 'geo2-types': 'ng' })
   })
 })
