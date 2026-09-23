@@ -623,6 +623,9 @@ a {
 .cat-page-header {
   background: #d55e00;
 }
+.cat-data-page {
+  background: #0072b2;
+}
 .burst {
   margin: 4px 0;
   border: 1px solid var(--border);
@@ -665,4 +668,8 @@ a {
   height: 8px;
   background: #ff5a36;
   border-radius: 1px;
+}
+.data-toggle {
+  display: block;
+  margin: 4px 0 8px;
 }

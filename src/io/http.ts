@@ -49,8 +49,8 @@ export class HttpRangeSource implements RandomAccessSource {
     return new HttpRangeSource(url, size)
   }
 
-  async read(offset: number, length: number): Promise<ArrayBuffer> {
-    const res = await this.fetchRange(offset, length)
+  async read(offset: number, length: number, _purpose?: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+    const res = await this.fetchRange(offset, length, signal)
     const buf = await res.arrayBuffer()
     if (buf.byteLength !== length) {
       throw new SourceError(
@@ -67,11 +67,13 @@ export class HttpRangeSource implements RandomAccessSource {
     return `bytes=${offset}-${offset + length - 1}`
   }
 
-  private async fetchRange(offset: number, length: number): Promise<Response> {
+  private async fetchRange(offset: number, length: number, signal?: AbortSignal): Promise<Response> {
     let res: Response
     try {
-      res = await fetch(this.url, { headers: { Range: HttpRangeSource.rangeHeader(offset, length) } })
+      res = await fetch(this.url, { headers: { Range: HttpRangeSource.rangeHeader(offset, length) }, signal })
     } catch (e) {
+      // 中断は失敗ではないので、CORS の疑いなどの説明を付けずにそのまま返す
+      if (signal?.aborted) throw e
       throw new SourceError('network-or-cors', `Range 取得に失敗しました（${(e as Error).message}）`, 'CORS またはネットワークの問題の可能性があります。')
     }
     if (res.status === 200) {

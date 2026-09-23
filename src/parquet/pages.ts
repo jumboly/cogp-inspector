@@ -40,7 +40,8 @@ const HEADER_CONCURRENCY = 8
  * Access Simulator で地図を動かすたびに、前に読んだ Row Group の Index を読み直さないため。
  */
 export class PageCache {
-  private readonly source: RandomAccessSource
+  /** Access Plan どおりに実データを読むときも、同じ（記録付きの）source を使う */
+  readonly source: RandomAccessSource
   private readonly file: FileModel
   private readonly offsetIndexes = new Map<string, OffsetIndexModel>()
   private readonly columnIndexes = new Map<string, ColumnIndexModel>()

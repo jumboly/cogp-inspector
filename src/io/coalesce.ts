@@ -27,7 +27,7 @@ export function coalesce<T>(items: T[], rangeOf: (t: T) => ByteRange): Run<T>[] 
 }
 
 // ブラウザの同一ホストへの同時接続数（HTTP/1.1 で 6）に合わせる
-const READ_CONCURRENCY = 6
+export const READ_CONCURRENCY = 6
 
 export interface RangeRequest {
   range: ByteRange

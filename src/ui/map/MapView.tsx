@@ -4,6 +4,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import { viewportBoxes } from '../../plan/viewport'
 import { useStore } from '../../state/store'
 import { SELECT_COLOR } from '../../util/color'
+import { dataFeatures } from './dataLayer'
 import { LevelControl } from './LevelControl'
 import { spanFeatures } from './pageLayer'
 import { lonLatBboxes, rowGroupFeatures, unionBbox, type RowGroupFeatureProps } from './rowGroupLayer'
@@ -29,6 +30,9 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
 
 const SRC = 'row-groups'
 const SPAN_SRC = 'page-spans'
+const DATA_SRC = 'data-rows'
+// 読んだが表示範囲の外だった行（design.md D36）。Level の色と紛れないよう無彩色にする
+const OUT_OF_VIEW_COLOR = '#8a8a8a'
 // Page bbox は bbox covering 列の ColumnIndex から求めるので、covering 列と同じ色で描く
 const SPAN_COLOR = '#0072b2'
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
@@ -59,6 +63,7 @@ export function MapView() {
   const simEnabled = useStore((s) => s.simulator.enabled)
   const plan = useStore((s) => s.simulator.plan)
   const focus = useStore((s) => s.simulator.focus)
+  const dataRows = useStore((s) => s.data.features)
 
   useEffect(() => {
     if (!container.current) return
@@ -75,6 +80,19 @@ export function MapView() {
       map.addLayer({ id: 'span-fill', type: 'fill', source: SPAN_SRC, paint: { 'fill-color': SPAN_COLOR, 'fill-opacity': ['case', ['get', 'kept'], 0.03, 0] } })
       map.addLayer({ id: 'span-line', type: 'line', source: SPAN_SRC, paint: { 'line-color': SPAN_COLOR, 'line-width': 1, 'line-opacity': ['case', ['get', 'kept'], 0.9, 0.25] } })
       map.addLayer({ id: 'span-hover', type: 'line', source: SPAN_SRC, filter: ['==', ['get', 'span'], -1], paint: { 'line-color': SELECT_COLOR, 'line-width': 2.5 } })
+      // 実データ（decode した行）は bbox の枠より上に描く。範囲外の行は薄い灰色、範囲内は Level の色
+      map.addSource(DATA_SRC, { type: 'geojson', data: EMPTY })
+      const dataColor: maplibregl.ExpressionSpecification = ['case', ['get', 'inView'], ['get', 'color'], OUT_OF_VIEW_COLOR]
+      const dataOpacity: maplibregl.ExpressionSpecification = ['case', ['get', 'inView'], 0.9, 0.35]
+      map.addLayer({ id: 'data-fill', type: 'fill', source: DATA_SRC, filter: ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]], paint: { 'fill-color': dataColor, 'fill-opacity': ['*', dataOpacity, 0.4] } })
+      map.addLayer({ id: 'data-line', type: 'line', source: DATA_SRC, filter: ['!', ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]]], paint: { 'line-color': dataColor, 'line-opacity': dataOpacity, 'line-width': 1 } })
+      map.addLayer({
+        id: 'data-point',
+        type: 'circle',
+        source: DATA_SRC,
+        filter: ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]],
+        paint: { 'circle-color': dataColor, 'circle-opacity': dataOpacity, 'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 1.5, 14, 3.5], 'circle-stroke-width': 0 },
+      })
       setLoaded(true)
     })
 
@@ -94,6 +112,8 @@ export function MapView() {
       if (useStore.getState().hoverRowGroup !== rg) useStore.getState().setHoverRowGroup(rg)
     })
     mapRef.current = map
+    // 開発時だけ、ブラウザの自動操作（動作確認）から地図を動かせるようにする
+    if (import.meta.env.DEV) (window as unknown as { __map?: maplibregl.Map }).__map = map
     // StrictMode の二重マウントや画面遷移で WebGL コンテキストが残らないよう、必ず破棄する
     return () => {
       map.remove()
@@ -208,6 +228,13 @@ export function MapView() {
     }
   }, [loaded, simEnabled, inspection])
 
+
+  // 実データ: 読み終わった計画の行を描く（読んでいる間は前の結果を残す）
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !loaded) return
+    ;(map.getSource(DATA_SRC) as maplibregl.GeoJSONSource).setData(inspection && dataRows.length ? dataFeatures(inspection, dataRows) : EMPTY)
+  }, [inspection, dataRows, loaded])
 
   useEffect(() => {
     const map = mapRef.current

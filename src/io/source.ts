@@ -11,8 +11,9 @@ export interface RandomAccessSource {
   /**
    * offset から length バイトを読む。
    * purpose は「なぜ読んだか」のラベルで、Range Request の記録と「推定 vs 実測」の比較に使う。
+   * signal は地図を動かしたときに古い実データの読み込みを止めるため（design.md D33）。
    */
-  read(offset: number, length: number, purpose: string): Promise<ArrayBuffer>
+  read(offset: number, length: number, purpose: string, signal?: AbortSignal): Promise<ArrayBuffer>
 }
 
 export interface ReadRecord {
@@ -26,4 +27,6 @@ export interface ReadRecord {
   /** HTTP の場合に実際に送った Range ヘッダ（ローカルでは undefined） */
   rangeHeader?: string
   error?: string
+  /** 中断された read（error にも理由が入る） */
+  aborted?: boolean
 }

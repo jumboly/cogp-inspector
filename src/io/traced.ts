@@ -21,7 +21,7 @@ export class TracedSource implements RandomAccessSource {
     this.onRecord = onRecord
   }
 
-  async read(offset: number, length: number, purpose: string): Promise<ArrayBuffer> {
+  async read(offset: number, length: number, purpose: string, signal?: AbortSignal): Promise<ArrayBuffer> {
     const record: ReadRecord = {
       id: this.nextId++,
       offset,
@@ -32,9 +32,10 @@ export class TracedSource implements RandomAccessSource {
       rangeHeader: this.kind === 'http' ? HttpRangeSource.rangeHeader(offset, length) : undefined,
     }
     try {
-      return await this.inner.read(offset, length, purpose)
+      return await this.inner.read(offset, length, purpose, signal)
     } catch (e) {
       record.error = (e as Error).message
+      if (signal?.aborted) record.aborted = true
       throw e
     } finally {
       record.durationMs = performance.now() - record.startedAt

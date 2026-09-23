@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import type { Inspection } from '../../inspect'
+import { MAX_DATA_BYTES, type DataBlocker } from '../../data/readData'
 import { MAX_PAGE_INDEX_ROW_GROUPS, type AccessPlan } from '../../plan/accessPlan'
-import { useStore, type PlanStage } from '../../state/store'
+import { useStore, type DataState, type PlanStage } from '../../state/store'
 import { levelColor } from '../../util/color'
 import { formatBytes, formatNumber, formatPercent } from '../../util/format'
 import { columnRole, ROLE_LABEL } from './columnRole'
@@ -24,10 +25,21 @@ export function AccessPlanView({ ins }: { ins: Inspection }) {
   return (
     <>
       <h3>Access Plan（推定）</h3>
+      <DataToggle />
       <ColumnPicker ins={ins} />
       {sim.status === 'error' && <p className="warn">計算できませんでした: {sim.error}</p>}
       {!sim.plan ? <p className="muted">計算中…</p> : <Funnel ins={ins} plan={sim.plan} focus={sim.focus} running={sim.status === 'running'} />}
     </>
+  )
+}
+
+function DataToggle() {
+  const enabled = useStore((s) => s.data.enabled)
+  const setDataEnabled = useStore((s) => s.setDataEnabled)
+  return (
+    <label className="data-toggle" title="推定した範囲のデータページを実際に読み、geometry を decode して地図に描きます（design.md D32）">
+      <input type="checkbox" checked={enabled} onChange={(e) => setDataEnabled(e.target.checked)} /> 実データを読む（通信が発生します）
+    </label>
   )
 }
 
@@ -63,6 +75,7 @@ interface Row {
 
 function Funnel({ ins, plan, focus, running }: { ins: Inspection; plan: AccessPlan; focus: PlanStage; running: boolean }) {
   const setFocus = useStore((s) => s.setPlanFocus)
+  const data = useStore((s) => s.data)
   const select = useStore((s) => s.select)
   const s = plan.stages
   const lod = ins.lod
@@ -128,7 +141,7 @@ function Funnel({ ins, plan, focus, running }: { ins: Inspection; plan: AccessPl
       bytes: s.requests.bytes,
       note: <>隣接・重なるページ範囲を 1 回の Range Request にまとめる（隙間は埋めない）。全列なら {formatNumber(s.requests.logicalAll)} → {formatNumber(s.requests.coalescedAll)} 回</>,
     },
-    { label: '6. デコード', count: '-', note: '読んだページの展開と、行ごとの bbox 判定は Phase 3 で対応予定' },
+    decodeRow(data, plan),
   ]
 
   return (
@@ -148,7 +161,10 @@ function Funnel({ ins, plan, focus, running }: { ins: Inspection; plan: AccessPl
           ))}
         </tbody>
       </table>
-      <p className="muted">段階をクリックすると、地図と Physical File Map がその段階の結果を強調します。「読む量」はデータページの推定で、まだ読んでいません（実際に読んだのは Page Index だけ）。</p>
+      <p className="muted">
+        段階をクリックすると、地図と Physical File Map がその段階の結果を強調します。
+        {data.enabled ? '5. までの「読む量」は推定、6. は実際に読んで decode した結果です。' : '「読む量」はデータページの推定で、まだ読んでいません（実際に読んだのは Page Index だけ）。'}
+      </p>
       <h4>読む Row Group（{formatNumber(plan.rowGroups.length)} 個）</h4>
       <table className="table">
         <thead>
@@ -175,6 +191,37 @@ function Funnel({ ins, plan, focus, running }: { ins: Inspection; plan: AccessPl
       </table>
     </>
   )
+}
+
+const BLOCKER_NOTE: Record<DataBlocker, string> = {
+  'no-geometry-column': '主ジオメトリ列が見つからないため描けない',
+  'unsupported-encoding': 'geometry の encoding が WKB ではないため、このツールでは decode しない（GeoArrow は未対応）',
+  unmappable: 'CRS が地図表示に未対応のため描かない',
+  'geometry-not-selected': 'geometry 列を読んでいないので描けない。描くには geometry 列が要る（列指向なので、要らない列は読まずに済む）',
+  'nothing-to-read': '表示範囲と重なるページが無いので、読むものが無い',
+  'over-limit': `読む量が上限 ${formatBytes(MAX_DATA_BYTES)} を超えるため読まない（lod の無いファイルの全体表示や、大きい列を足したときの歯止め）。拡大するか、読む列を減らすと読める`,
+}
+
+/** 6. 実データの decode（design.md D31〜D36）。行単位の判定まで行い、読んだ行と範囲内の行を比べる */
+function decodeRow(data: DataState, plan: AccessPlan): Row {
+  const label = '6. 読んで decode する'
+  if (!data.enabled) return { label, count: '-', note: '「実データを読む」を ON にすると、この計画どおりにデータページを読み、geometry を decode して地図に描きます' }
+  if (data.status === 'blocked' && data.blocker) return { label, count: '読まない', note: BLOCKER_NOTE[data.blocker] }
+  if (data.status === 'error') return { label, count: 'エラー', note: data.error }
+  const r = data.result
+  if (data.status === 'reading' || !r) return { label, count: '読み込み中…', note: `${formatNumber(plan.requests.length)} 回の Range Request で読む` }
+  return {
+    label,
+    count: `${formatNumber(r.inViewRows)} / ${formatNumber(r.readRows)} 行`,
+    bytes: r.bytes,
+    note: (
+      <>
+        {formatNumber(r.requests)} 回の Range Request で読み（{Math.round(r.ms)} ms）、geometry を decode した。読んだページが覆う {formatNumber(r.readRows)} 行のうち、ジオメトリの bbox が表示範囲と重なるのは {formatNumber(r.inViewRows)} 行（
+        {formatPercent(r.inViewRows, r.readRows)}）。残りはページ単位の絞り込みでは除けず「読んだが捨てる」行（地図の灰色の点）
+        {r.emptyRows > 0 && `。geometry が空で描けない行 ${formatNumber(r.emptyRows)}`}
+      </>
+    ),
+  }
 }
 
 function FunnelRow({ row, top, active, onClick, fileSize }: { row: Row; top: number; active: boolean; onClick?: () => void; fileSize: number }) {

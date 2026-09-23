@@ -1,5 +1,7 @@
+import type { Compressors } from 'hyparquet'
 import { create } from 'zustand'
 import { levelOfRowGroup } from '../cogp/lod'
+import { dataBlocker, readPlanData, type DataBlocker, type DataReadResult, type DecodedFeature } from '../data/readData'
 import { SourceError } from '../io/errors'
 import type { RandomAccessSource, ReadRecord } from '../io/source'
 import { TracedSource } from '../io/traced'
@@ -52,6 +54,23 @@ export interface SimulatorState {
 
 const SIM_OFF: SimulatorState = { enabled: false, columns: [], status: 'idle', focus: 'requests' }
 
+/** 「実データを読む」（design.md D32）。Access Plan の計算が終わるたびに、その計画どおりに読んで描く */
+export interface DataState {
+  enabled: boolean
+  status: 'idle' | 'reading' | 'done' | 'blocked' | 'error'
+  blocker?: DataBlocker
+  result?: DataReadResult
+  error?: string
+  /** 地図に描く行。読み終わるまでは前の計画の結果を残す */
+  features: DecodedFeature[]
+}
+
+const DATA_OFF: DataState = { enabled: false, status: 'idle', features: [] }
+
+// 展開ライブラリは「実データを読む」を初めて ON にしたときに読み込む（初期表示のバンドルを増やさない：D34）
+let compressorsPromise: Promise<Compressors> | undefined
+const loadCompressors = () => (compressorsPromise ??= import('hyparquet-compressors').then((m) => m.compressors))
+
 export const chunkKey = (rg: number, col: number) => `${rg}:${col}`
 
 interface State {
@@ -70,6 +89,7 @@ interface State {
   hoverSpan: { rg: number; span: number } | null
   reads: ReadRecord[]
   simulator: SimulatorState
+  data: DataState
   selection: Selection | null
   selectOrigin?: SelectOrigin
   /** 地図に表示する Level（null = すべての Row Group を表示） */
@@ -85,12 +105,19 @@ interface State {
   setSimulatorEnabled: (enabled: boolean) => void
   setSimulatorColumns: (columns: number[]) => void
   setPlanFocus: (focus: PlanStage) => void
+  setDataEnabled: (enabled: boolean) => void
   /** 地図から呼ぶ。表示範囲と縮尺が変わるたびに Access Plan を計算し直す */
   runSimulation: (view: Omit<PlanInput, 'columns'>) => void
 }
 
 // 地図を続けて動かしたとき、古い計算の結果で新しい結果を上書きしないための通し番号
 let simToken = 0
+// 読み込み中の実データ。地図が動いたら中断する（design.md D33）
+let dataAbort: AbortController | undefined
+const abortData = () => {
+  dataAbort?.abort()
+  dataAbort = undefined
+}
 
 export const useStore = create<State>((set, get) => ({
   status: 'idle',
@@ -99,12 +126,14 @@ export const useStore = create<State>((set, get) => ({
   pageBboxes: {},
   hoverSpan: null,
   simulator: SIM_OFF,
+  data: DATA_OFF,
   selection: null,
   viewLevel: null,
   hoverRowGroup: null,
 
   async open(openSource) {
-    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], simulator: SIM_OFF, selection: null, viewLevel: null, hoverRowGroup: null })
+    abortData()
+    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], simulator: SIM_OFF, data: DATA_OFF, selection: null, viewLevel: null, hoverRowGroup: null })
     try {
       const raw = await openSource()
       set({ sourceName: raw.name, sourceKind: raw.kind })
@@ -174,7 +203,8 @@ export const useStore = create<State>((set, get) => ({
     const { inspection, simulator } = get()
     if (!inspection) return
     if (!enabled) {
-      set({ simulator: { ...SIM_OFF, columns: simulator.columns }, viewLevel: null, selection: get().selection?.kind === 'plan' ? { kind: 'file' } : get().selection })
+      abortData()
+      set({ simulator: { ...SIM_OFF, columns: simulator.columns }, data: DATA_OFF, viewLevel: null, selection: get().selection?.kind === 'plan' ? { kind: 'file' } : get().selection })
       return
     }
     // 計算は地図が表示範囲を渡したとき（runSimulation）に始まる
@@ -191,16 +221,31 @@ export const useStore = create<State>((set, get) => ({
   },
   setPlanFocus: (focus) => set({ simulator: { ...get().simulator, focus } }),
 
+  setDataEnabled(enabled) {
+    abortData()
+    if (!enabled) {
+      set({ data: DATA_OFF })
+      return
+    }
+    set({ data: { ...DATA_OFF, enabled: true } })
+    const { plan, status } = get().simulator
+    // 計算中なら、終わったときに runSimulation から読み始める
+    if (plan && status === 'ready') readData(plan)
+  },
+
   runSimulation(view) {
     const { inspection, pageCache, simulator } = get()
     if (!inspection || !pageCache || !simulator.enabled) return
     const token = ++simToken
+    // 計画が変わるので、前の計画の実データの読み込みは止める（描いた結果は次の結果が出るまで残す）
+    abortData()
     set({ simulator: { ...simulator, status: 'running', lastView: view } })
     planAccess(inspection, pageCache, { ...view, columns: simulator.columns }).then(
       (plan) => {
         if (token !== simToken || !get().simulator.enabled) return
         // Simulator の間は、選ばれた Level の prefix を地図に表示する（手動の Level 選択は無効：design.md D19）
         set({ simulator: { ...get().simulator, status: 'ready', plan, error: undefined }, viewLevel: plan.level.used ? (plan.level.level?.level ?? null) : null })
+        if (get().data.enabled) readData(plan)
       },
       (e) => {
         if (token !== simToken) return
@@ -209,3 +254,35 @@ export const useStore = create<State>((set, get) => ({
     )
   },
 }))
+
+/** 計画どおりに実データを読み、decode して地図に描く行を store に入れる */
+function readData(plan: AccessPlan) {
+  const { inspection, pageCache } = useStore.getState()
+  const source = pageCache?.source
+  if (!inspection || !source) return
+  const setData = (patch: Partial<DataState>) => useStore.setState({ data: { ...useStore.getState().data, ...patch } })
+  const blocker = dataBlocker(inspection, plan)
+  if (blocker) {
+    // 読めないときは前の描画も消す。残すと「いまの表示範囲で読んだ結果」と誤解させるため
+    setData({ status: 'blocked', blocker, result: undefined, error: undefined, features: [] })
+    return
+  }
+  abortData()
+  const ac = new AbortController()
+  dataAbort = ac
+  setData({ status: 'reading', blocker: undefined, error: undefined })
+  const features: DecodedFeature[] = []
+  loadCompressors()
+    .then((compressors) => readPlanData(inspection, source, plan, { compressors, signal: ac.signal, onChunk: (f) => features.push(...f) }))
+    .then(
+      (result) => {
+        if (ac.signal.aborted || !useStore.getState().data.enabled) return
+        setData({ status: 'done', result, features })
+      },
+      (e) => {
+        // 中断は新しい計画に置き換わっただけなので、エラーとして見せない
+        if (ac.signal.aborted) return
+        setData({ status: 'error', error: (e as Error).message })
+      },
+    )
+}

@@ -1,4 +1,4 @@
-import { useStore } from '../../state/store'
+import { useStore, type DataState } from '../../state/store'
 import { levelColor } from '../../util/color'
 import { formatBytes, formatNumber, formatPercent } from '../../util/format'
 
@@ -10,6 +10,8 @@ export function LevelControl() {
   const ins = useStore((s) => s.inspection)!
   const sim = useStore((s) => s.simulator)
   const setSimulatorEnabled = useStore((s) => s.setSimulatorEnabled)
+  const data = useStore((s) => s.data)
+  const setDataEnabled = useStore((s) => s.setDataEnabled)
   const select = useStore((s) => s.select)
   const unit = ins.geo?.primary?.crs.unit ?? ''
   return (
@@ -25,9 +27,25 @@ export function LevelControl() {
           </>
         )}
       </div>
+      {sim.enabled && (
+        <div className="sim-row">
+          <label title="推定した範囲のデータページを実際に読み、geometry を decode して描きます（通信が発生します）">
+            <input type="checkbox" checked={data.enabled} onChange={(e) => setDataEnabled(e.target.checked)} /> 実データを読む
+          </label>
+          {data.enabled && <span className="muted">{dataStatusText(data)}</span>}
+        </div>
+      )}
       {ins.lod && <LevelSection />}
     </div>
   )
+}
+
+function dataStatusText(d: DataState): string {
+  if (d.status === 'reading') return '読み込み中…'
+  if (d.status === 'blocked') return '読まない（Access Plan を参照）'
+  if (d.status === 'error') return `エラー: ${d.error}`
+  if (d.status === 'done' && d.result) return `${formatNumber(d.result.readRows)} 行を読み、範囲内 ${formatNumber(d.result.inViewRows)} 行`
+  return ''
 }
 
 function LevelSection() {

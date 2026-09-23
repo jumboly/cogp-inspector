@@ -16,7 +16,9 @@ export class LocalBlobSource implements RandomAccessSource {
     this.size = blob.size
   }
 
-  async read(offset: number, length: number): Promise<ArrayBuffer> {
+  async read(offset: number, length: number, _purpose?: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+    // Blob の読み込みは途中で止められないので、始める前にだけ確かめる
+    signal?.throwIfAborted()
     return this.blob.slice(offset, offset + length).arrayBuffer()
   }
 }

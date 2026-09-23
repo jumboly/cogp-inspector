@@ -52,8 +52,11 @@ export interface RowGroupPlan {
   spanKept?: boolean[]
   /** 読む行（Row Group 内）。ページ単位で絞れなければ Row Group 全体 */
   keptRows: RowSpan[]
-  /** 列ごとの読む範囲（選んだ列のみ） */
-  chunkRanges: { col: number; ranges: ByteRange[]; pages: number; pagesTotal: number; how: 'pages' | 'whole-chunk' }[]
+  /**
+   * 列ごとの読む範囲。rows は読むデータページが覆う行（Row Group 内、ページ順）で、
+   * decode した値を行番号に対応づけるのに使う（ページ単位で読むので keptRows より広い）
+   */
+  chunkRanges: { col: number; ranges: ByteRange[]; rows: RowSpan[]; pages: number; pagesTotal: number; how: 'pages' | 'whole-chunk' }[]
 }
 
 export interface AccessPlan {
@@ -113,14 +116,18 @@ const overlapsAny = (start: number, end: number, rows: RowSpan[]) => rows.some((
  * 辞書ページはデータページの値を復元するのに必要なので、データページを 1 つでも読むなら含める。
  * OffsetIndex が無ければページの位置が分からないので Column Chunk 全体を読む。
  */
-function chunkRanges(cache: PageCache, chunk: ColumnChunkModel, rows: RowSpan[]) {
+function chunkRanges(cache: PageCache, chunk: ColumnChunkModel, rows: RowSpan[], numRows: number) {
   const oi = cache.offsetIndex(chunk)
-  if (!oi) return { ranges: rows.length ? [chunk.range] : [], pages: rows.length ? 1 : 0, pagesTotal: 1, how: 'whole-chunk' as const }
+  if (!oi) {
+    const all = rows.length ? [{ start: 0, end: numRows }] : []
+    return { ranges: rows.length ? [chunk.range] : [], rows: all, pages: rows.length ? 1 : 0, pagesTotal: 1, how: 'whole-chunk' as const }
+  }
   const picked = oi.pages.filter((p) => overlapsAny(p.firstRow, p.firstRow + p.rowCount, rows))
   const ranges = picked.map((p) => ({ start: p.offset, end: p.offset + p.compressedSize }))
   const firstData = oi.pages[0]?.offset ?? chunk.range.end
   if (ranges.length && chunk.range.start < firstData) ranges.unshift({ start: chunk.range.start, end: firstData })
-  return { ranges, pages: picked.length, pagesTotal: oi.pages.length, how: 'pages' as const }
+  const pageRows = picked.map((p) => ({ start: p.firstRow, end: p.firstRow + p.rowCount }))
+  return { ranges, rows: pageRows, pages: picked.length, pagesTotal: oi.pages.length, how: 'pages' as const }
 }
 
 const rangeBytes = (rs: ByteRange[]) => rs.reduce((a, r) => a + r.end - r.start, 0)
@@ -173,7 +180,7 @@ export async function planAccess(ins: Inspection, cache: PageCache, input: PlanI
       pageBboxes: pb,
       spanKept,
       keptRows,
-      chunkRanges: r.columns.map((c) => ({ col: c.column.index, ...chunkRanges(cache, c, keptRows) })),
+      chunkRanges: r.columns.map((c) => ({ col: c.column.index, ...chunkRanges(cache, c, keptRows, r.numRows) })),
     }
   })
 

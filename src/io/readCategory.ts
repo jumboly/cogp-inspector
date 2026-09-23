@@ -1,13 +1,14 @@
 import type { ReadRecord } from './source'
 
 /** read の目的の分類。purpose の先頭の語で決まる（purpose は読み込み元が付ける：pages.ts・footer.ts） */
-export type ReadCategory = 'footer' | 'offset-index' | 'column-index' | 'page-header' | 'other'
+export type ReadCategory = 'footer' | 'offset-index' | 'column-index' | 'page-header' | 'data-page' | 'other'
 
 export function readCategory(purpose: string): ReadCategory {
   if (purpose.startsWith('trailer') || purpose.startsWith('footer')) return 'footer'
   if (purpose.startsWith('OffsetIndex')) return 'offset-index'
   if (purpose.startsWith('ColumnIndex')) return 'column-index'
   if (purpose.startsWith('page-header')) return 'page-header'
+  if (purpose.startsWith('data ')) return 'data-page'
   return 'other'
 }
 
@@ -16,6 +17,7 @@ export const CATEGORY_LABEL: Record<ReadCategory, string> = {
   'offset-index': 'OffsetIndex',
   'column-index': 'ColumnIndex',
   'page-header': 'ページヘッダ',
+  'data-page': 'データページ',
   other: 'その他',
 }
 
