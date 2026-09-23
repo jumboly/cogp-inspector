@@ -32,6 +32,7 @@ export type Selection =
   /** id があれば、その read を選んでいる（Physical File Map でその範囲を示す） */
   | { kind: 'reads'; id?: number }
   | { kind: 'plan' }
+  | { kind: 'diagnosis' }
 
 /** 選択の発生元。地図以外で選んだときだけ地図をその場所へ動かす */
 export type SelectOrigin = 'map' | 'tree' | 'bytemap' | 'inspector'

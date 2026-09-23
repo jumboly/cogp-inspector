@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { HttpRangeSource } from '../../io/http'
 import { LocalBlobSource } from '../../io/local'
+import { useDiagnosis } from '../../state/diagnosis'
 import { useStore } from '../../state/store'
 import { formatBytes, formatNumber, formatPercent } from '../../util/format'
 
@@ -65,6 +66,7 @@ export function OpenBar() {
               {sourceName}
             </span>
             <span className="muted">{formatBytes(inspection.file.size)}</span>
+            <DiagnosisLink />
             <button className="link" onClick={() => select({ kind: 'reads' }, 'tree')} title="実際に読んだ範囲の一覧">
               読み込み {formatNumber(reads.length)} 回 / {formatBytes(readBytes)}（{formatPercent(readBytes, inspection.file.size)}）
             </button>
@@ -92,5 +94,19 @@ export function ErrorBanner() {
       <strong>開けませんでした：</strong> {error.message}
       {error.hint && <div className="muted">{error.hint}</div>}
     </div>
+  )
+}
+
+/** 診断の要約（design.md D41）。ファイルを開いた時点で Footer だけから決まるので、ヘッダに常に出しておく */
+function DiagnosisLink() {
+  const d = useDiagnosis()
+  const select = useStore((s) => s.select)
+  if (!d) return null
+  const { mustNg, warn } = d.summary
+  return (
+    <button className="link" onClick={() => select({ kind: 'diagnosis' }, 'tree')} title="Cloud Optimized と言える構造かの診断">
+      診断: {mustNg ? <span className="verdict-ng">MUST 違反 {mustNg}</span> : 'MUST OK'}
+      {warn > 0 && <span className="verdict-warn">・注意 {warn}</span>}
+    </button>
   )
 }

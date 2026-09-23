@@ -695,3 +695,51 @@ a {
 .compare td:not(:first-child) {
   text-align: right;
 }
+/* 診断（design.md D41）。MUST の違反（赤）と SHOULD・目安の注意（黄）を色でも分ける */
+.diag td {
+  white-space: normal;
+}
+.diag td:first-child {
+  width: 4.5em;
+}
+.verdict {
+  display: inline-block;
+  min-width: 3.5em;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  text-align: center;
+  border: 1px solid currentColor;
+}
+.verdict-ok {
+  color: #009e73;
+}
+.verdict-ng {
+  color: #d62728;
+}
+.verdict-warn {
+  color: #8a7c00;
+}
+.verdict-info,
+.verdict-unknown,
+.verdict-na {
+  color: var(--muted);
+}
+.verdict-unknown {
+  border-style: dashed;
+}
+.diag-value {
+  margin-top: 2px;
+}
+.diag-note {
+  font-size: 11px;
+}
+.diag-detail td {
+  border-bottom: none;
+  padding-top: 0;
+}
+.diag-detail-label {
+  display: inline-block;
+  min-width: 11em;
+  color: var(--muted);
+}

@@ -9,6 +9,7 @@ import { columnRole, ROLE_LABEL } from './columnRole'
 import { Help, Overview } from './help'
 import { LevelPrefix } from './LevelPrefix'
 import { AccessPlanView } from './AccessPlanView'
+import { DiagnosisView } from './DiagnosisView'
 import { PageBboxSection } from './PageBboxView'
 import { ChunkPagesSection, PageView } from './PagesView'
 import { ReadsView } from './ReadsView'
@@ -158,6 +159,8 @@ function Body({ sel, ins }: { sel: Selection; ins: Inspection }) {
       return <ReadsView fileSize={file.size} selectedId={sel.id} />
     case 'plan':
       return <AccessPlanView ins={ins} />
+    case 'diagnosis':
+      return <DiagnosisView />
   }
 }
 

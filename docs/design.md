@@ -253,6 +253,17 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
 - Physical File Map の「読む予定」の下に「実際に読んだ」の段を追加した。予定どおりは緑（「読む予定」と同じ色）、予定外は黄、中断・失敗は灰で塗り、未読は破線の枠で示す。geometry 列の橙と区別するため、予定外は黄にした。
 - ブラウザで確かめた結果（公式サンプル、HTTP）: 読み終わった計画は全項目が「一致」する。20 本目の read を 500 にすると、失敗 1・中断 5・未読 43 に分かれて表示される。
 
+実装メモ（段階 D）:
+
+- Inspector にはタブが無く、表示は Selection で切り替わる。そこで「診断」タブは `{ kind: 'diagnosis' }` の Selection とし、ヘッダに要約のリンク（「診断: MUST OK・注意 n」）を置いた。ファイルを開いた時点で Footer だけから決まるので、開いた直後から見える。
+- 判定は `src/diagnose/diagnose.ts` の純粋関数。項目ごとに ok（満たす）・ng（違反）・warn（注意）・info（参考値、合否なし）・unknown（未確認）・na（対象外）を付ける。ng は MUST だけに使い、SHOULD と目安には warn を使う（issue 07）。
+- MUST: GeoParquet の geo メタデータの形、lod の境界条件（`parseLod` の違反を条件ごとの行に振り分ける）、Row Group が Level 境界をまたがない（row_group_end が Row Group 番号なので、境界条件を満たせば構造上満たす）、各行を 1 回だけ格納（ファイルだけでは確かめられないので常に未確認）。
+- SHOULD: 空間統計の有無、先頭 Row Group の小ささ（中央値より小さいかを目安にした）、Level ごとの重なり係数（D42）、Level 0 がデータ全体の範囲の何 % を覆うか（「粗い Level をデータ全体に散らす」の参考値）。
+- 目安: bbox covering、Page Index（全列の OffsetIndex と covering 列の ColumnIndex）、covering 4 列のページ境界、Row Group の大きさ。
+- ページ境界は、PageCache に Index がある Row Group の分だけ判定する。Row Group を選んだときも、Access Simulator で読んだときも数に入る。PageCache は変更を通知しないので、read の数が増えたことを合図に判定し直す。
+- D42 の説明を実装で改めた。重なり係数は、1 を超えた分が重なり、1 未満は Row Group の間の隙間（データの無い範囲）を表す。「1 に近いほど重なりが少ない」は 1 未満の側では当たらない。
+- 公式サンプルの結果: MUST はすべて満たす（「各行を 1 回だけ」は未確認）。RG 0 は 8,103 行（中央値 65,536 行）。Level 0 はデータ全体の範囲の 100 % を覆う。重なり係数は Level 0〜2 で 1.00、細かい Level ほど下がり 0.74〜0.78。どの Level も 1 を超えないので Row Group どうしはほとんど重ならず、1 未満は海などの隙間による。
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
