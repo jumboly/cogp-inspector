@@ -76,6 +76,10 @@ function DataContentView({ dict, data }: { dict: DictionaryContent; data: DataPa
   // index の区切りは「null でない値の何番目か」で数えるので、値の表の位置（pos）に戻す対応表
   const posOfNonNull = useMemo(() => data.entries.filter((e) => e.index !== undefined).map((e) => e.pos), [data])
   const rows = new Set(data.entries.map((e) => e.row)).size
+  let usedDictBytes = 0
+  for (const i of counts.keys()) usedDictBytes += dict.plainSizes[i]
+  // 1 つの辞書の値がこのページで平均何回使われたか。1 に近いほど、辞書に移しても小さくならない
+  const repeatRatio = counts.size ? nonNull / counts.size : 0
   const dictShare = formatPercent(dict.bodySize, dict.bodySize + data.bodySize)
   return (
     <>
@@ -84,7 +88,7 @@ function DataContentView({ dict, data }: { dict: DictionaryContent; data: DataPa
         rows={[
           ['値の数', `${formatNumber(data.entries.length)}（null でない値 ${formatNumber(nonNull)}・${formatNumber(rows)} 行）`, data.maxRep > 0 ? '入れ子の列なので、1 行に複数の値が入る' : undefined],
           ['辞書の件数', formatNumber(dict.values.length), `このページで使った値は ${formatNumber(counts.size)} 種類`],
-          ['index の bit width', `${data.bitWidth} ビット`, `1 つの index を ${data.bitWidth} ビットで表す。ページ本体の先頭 1 バイトに書かれている（多くの writer は、そのページを書いた時点の辞書の件数から決める）`],
+          ['index の bit width', `${data.bitWidth} ビット`, `1 つの index を ${data.bitWidth} ビットで表す。ページ本体の先頭 1 バイトに書かれている（ページごとに決まる。そこまでに辞書に入った件数を表せる幅になることが多い）`],
           ['level の最大値', `rep ${data.maxRep} / def ${data.maxDef}`, data.maxDef > 0 ? 'def level が最大値より小さい値は null（または空のリスト）で、index を持たない' : undefined],
         ]}
       />
@@ -103,14 +107,21 @@ function DataContentView({ dict, data }: { dict: DictionaryContent; data: DataPa
             </td>
           </tr>
           <tr>
-            <td>辞書ページ（Column Chunk の全ページで共有）</td>
-            <td className="mono">{formatBytes(dict.bodySize)}</td>
+            <td>辞書のうち、このページで使った {formatNumber(counts.size)} 種類の値</td>
+            <td className="mono">{formatBytes(usedDictBytes)}</td>
+          </tr>
+          <tr>
+            <td>index + 使った辞書の値</td>
+            <td className="mono">
+              {formatBytes(data.indexBytes + usedDictBytes)}（PLAIN の {formatPercent(data.indexBytes + usedDictBytes, data.plainBytes)}）
+            </td>
           </tr>
         </tbody>
       </table>
       <p className="muted">
-        辞書ページはこの Column Chunk のどのページを読むときにも必要です。このページだけを読むなら、読む量の {dictShare} が辞書ページです。
-        {data.indexBytes >= data.plainBytes / 2 && ' このページでは同じ値がほとんど繰り返されないので、辞書があまり効いていません。'}
+        値の中身は辞書ページにしか書かれていないので、index だけでなく使った辞書の値も足して比べます。辞書ページ全体（展開後 {formatBytes(dict.bodySize)}）は Column Chunk の全ページで共有され、
+        どのページを読むときにも必要です（このページだけを読むなら、読む量の {dictShare} が辞書ページ）。
+        {repeatRatio < 2 && ' このページでは同じ値がほとんど繰り返されない（1 つの値が平均 ' + repeatRatio.toFixed(1) + ' 回）ので、辞書は効いていません。値を別の場所に移して番号を足した分だけ、かえって大きくなります。'}
       </p>
       <h4>ページ本体の内訳（展開後 {formatBytes(data.bodySize)}）</h4>
       <BodyStrip data={data} focus={focus} setFocus={setFocus} />

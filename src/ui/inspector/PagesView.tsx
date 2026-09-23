@@ -142,7 +142,8 @@ function PageDetail({ chunk, pages, p, ci }: { chunk: ColumnChunkModel; pages: C
           ['CRC', h?.crc !== undefined ? String(h.crc) : 'なし'],
         ]}
       />
-      <PageContentSection rg={chunk.rowGroup} col={chunk.column.index} pages={pages} p={p} />
+      {/* ページごとに作り直す。強調中の区切りや表のページ送りの位置を、別のページに持ち越さないため */}
+      <PageContentSection key={`${chunk.rowGroup}:${chunk.column.index}:${p.index}`} rg={chunk.rowGroup} col={chunk.column.index} pages={pages} p={p} />
     </>
   )
 }

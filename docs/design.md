@@ -395,6 +395,38 @@ D53〜D57 はユーザーと 1 問ずつ議論して決定。D58 以降は「お
 | D59 | ページ本体の内訳 | ページの Inspector に、展開後の本体を「rep level / def level / index」に分けた帯を出す。区切り（RLE / Bit-Packing）をクリックすると、その区切りに当たる値を表で強調する | バイト列と値の対応が 1 画面で見える。Physical File Map は圧縮後のファイルの位置を表すので、展開後の内訳はそこに混ぜない |
 | D60 | 作る順番 | A. hybrid decoder とテスト（hyparquet と突き合わせ）→ B. ページ本体の読み込みと level・index・値への分解 → C. Inspector の UI（表・ページ送り・対応の強調・PLAIN との比較）→ D. ブラウザでの確認と design.md・issue 05 の更新。段階ごとに commit + push | 下の段階ほど UI から独立してテストできる |
 
+実装メモ（段階 A〜D）:
+
+- hybrid decoder は `decodeHybrid`（`src/parquet/hybrid.ts`）。区切りごとに種類・位置・ヘッダ長・取り出した値の数・書かれている値の数（Bit-Packing は 8 の倍数なので、末尾は詰め物を含む）を返す。
+  32 ビットの値で符号が付かないよう、ビット演算ではなく掛け算で組み立てる。テストは、自前の encoder で作ったランダムな並びを hyparquet の `readRleBitPackedHybrid` と突き合わせる。
+- ページの分解は `readPageContent`（`src/data/pageContent.ts`）。展開と PLAIN の decode・型の変換は hyparquet の内部関数（`decompressPage`・`readPlain`・`convert`）を使う。
+  v1 は本体全体を展開してから「4 バイトの長さ + level」を rep → def の順に読む。v2 は level が圧縮されないので、level と展開した値をつないで 1 つの「展開後の本体」として扱う。
+  v2 の level の長さを知るため、`PageHeaderModel` に `repLevelsByteLength`・`defLevelsByteLength` を足した。
+- 辞書ページの decode 結果は、PageCache ごとの WeakMap に Column Chunk 単位で残す。ファイルを開き直すと PageCache が作り直されるので、辞書も一緒に捨てられる。
+  ボタンに出すバイト数は、辞書を読み済みならデータページの分だけにする。
+- read の purpose は `page-content …` にし、Range 記録では「ページの中身（辞書と index）」という別の分類にした。Expected vs Actual（D40）の突き合わせには入れない。
+- 公開サンプルはすべて DATA_PAGE（v1）で、fallback も起きない。そのため `test/fixtures/dictionary/`（`make_dictionary.py` で作る 20KB ほどの 2 ファイル）で、v2 と fallback を確かめる。
+  辞書で符号化された全ページで、null でない値の並びが hyparquet の `readColumn` の結果と一致する。
+  fallback は pyarrow の `dictionary_pagesize_limit` を小さくして起こした。label 列（すべて違う値）は、#1 が RLE_DICTIONARY、#2・#3 が PLAIN になる。
+- hyparquet は Map 列を「key_value の繰り返し」の 1 段を残した入れ子の配列に組み立てる。テストでは平らにしてから比べる。
+- 実測（`tokyo-id.parquet` の RG0・ページ #1。どれも圧縮前）:
+
+  | 列 | 辞書の件数 | bit width | PLAIN | index | index の区切り（うち RLE） |
+  |---|---|---|---|---|---|
+  | id | 8,192 | 10 | 8.0KB | 1.25KB | 3（0） |
+  | tags.key | 396 | 8 | 105KB | 8.4KB | 17（0） |
+  | tags.value | 14,784 | 12 | 141KB | 12.5KB | 19（1） |
+
+  pyarrow の index はほぼすべて Bit-Packing で、RLE は level（tags の def level は 8,538 値が RLE 1 つ）に現れる。
+- D56 を実装中に改めた。id では index が PLAIN の 16% になるが、値そのものは辞書ページ（Row Group の 8,192 行ぶん、64KB）にすべて書かれており、小さくはなっていない。
+  index だけを PLAIN と比べると、この違いが見えない。そのため「このページで使った辞書の値の PLAIN サイズ」を足した合計も出す（id では PLAIN の 116% になる）。
+  1 つの値が平均 2 回未満しか使われないページには、辞書が効いていないことを注記する。
+- bit width はページごとに書かれる。id 列（RG0）では #1〜#8 が 10・11・12・12・13・13・13・13 ビットで、どのページもそこまでに出てきた辞書の件数（= そのページの index の最大値 + 1）をちょうど表せる幅だった。Row Group の全ページで 1 つの幅を使うわけではない。
+- ブラウザで確かめた結果（`tokyo-id.parquet`）:
+  tags.key の #1 は 1 回の read（辞書ページとデータページが隣り合う）で読む。#2 のボタンは、データページの分（5.40KB）だけを示す。
+  区切りのクリックで値の表が強調され、辞書の値のクリックで「index 6 はこのページに 521 回」と、その値の位置への移動が働く。
+  fixture の fallback.parquet では、PLAIN のページにボタンを出さず、fallback の説明を出す。
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
@@ -452,4 +484,4 @@ cogp-inspector/
 - Phase 2（実装済み）: Column Chunk 詳細、Page、Dictionary、Page Index、Page bbox、Page pruning、Access Simulator、Range Request 可視化
 - Phase 3（実装済み・§3.4）: 実データ描画、progressive rendering、Expected vs Actual 比較、診断、比較用サンプルの生成と通常 GeoParquet との比較
 - GeoParquet 2.0（実装済み・§3.5）: 論理型の GEOMETRY / GEOGRAPHY、論理型の crs、geo の無いファイル、日付変更線をまたぐ bbox、2.0 の MUST の診断、2.0 版のサンプル
-- 辞書の値と index の表示（作業中・§3.6）: 辞書ページとデータページの本体を読み、RLE / Bit-Packing の区切り・level・index・辞書の値の対応と、PLAIN で書いた場合との差を見せる
+- 辞書の値と index の表示（実装済み・§3.6）: 辞書ページとデータページの本体を読み、RLE / Bit-Packing の区切り・level・index・辞書の値の対応と、PLAIN で書いた場合との差を見せる
