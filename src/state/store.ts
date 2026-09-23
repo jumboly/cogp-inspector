@@ -59,9 +59,13 @@ export interface DataState {
   enabled: boolean
   status: 'idle' | 'reading' | 'done' | 'blocked' | 'error'
   blocker?: DataBlocker
+  /** 読み込み中はその時点までの集計（doneRequests < requests）、読み終わると最終結果 */
   result?: DataReadResult
   error?: string
-  /** 地図に描く行。読み終わるまでは前の計画の結果を残す */
+  /**
+   * 地図に描く行。読み終わった Column Chunk から描き足す（design.md D38）。
+   * 新しい計画の最初の Column Chunk が decode されるまでは、前の計画の行を残す（地図が一瞬空になるのを避ける）
+   */
   features: DecodedFeature[]
 }
 
@@ -240,6 +244,9 @@ export const useStore = create<State>((set, get) => ({
     // 計画が変わるので、前の計画の実データの読み込みは止める（描いた結果は次の結果が出るまで残す）
     abortData()
     set({ simulator: { ...simulator, status: 'running', lastView: view } })
+    // 中断した計画の進み具合（n / m Range）を、新しい計画の計算中に出し続けないよう消す
+    const { data } = get()
+    if (data.status === 'reading') set({ data: { ...data, result: undefined } })
     planAccess(inspection, pageCache, { ...view, columns: simulator.columns }).then(
       (plan) => {
         if (token !== simToken || !get().simulator.enabled) return
@@ -270,16 +277,49 @@ function readData(plan: AccessPlan) {
   abortData()
   const ac = new AbortController()
   dataAbort = ac
-  setData({ status: 'reading', blocker: undefined, error: undefined })
-  const features: DecodedFeature[] = []
+  setData({ status: 'reading', blocker: undefined, error: undefined, result: undefined })
+
+  // decode した行と進み具合は描画フレームごとにまとめて store に入れる。
+  // Column Chunk ごとに入れると、数万行の GeoJSON を地図に渡し直す回数が Range 数だけ増えて描画が詰まるため
+  // 新しい計画で描く行。最初の行が出るまでは undefined のままにして、前の計画の行を地図に残す
+  let features: DecodedFeature[] | undefined
+  let progress: DataReadResult | undefined
+  let frame: number | undefined
+  const flush = () => {
+    frame = undefined
+    if (ac.signal.aborted) return
+    const patch: Partial<DataState> = {}
+    // 配列を作り直して渡す（zustand は参照が変わったときだけ地図に描き直させるため）
+    if (features) patch.features = features.slice()
+    if (progress) patch.result = progress
+    setData(patch)
+  }
+  const schedule = () => {
+    frame ??= requestAnimationFrame(flush)
+  }
+  const onChunk = (f: DecodedFeature[]) => {
+    if (!f.length) return
+    const acc = (features ??= [])
+    // push(...f) は行数が大きいと引数の上限を超えるので 1 つずつ足す
+    for (const x of f) acc.push(x)
+    schedule()
+  }
+  const onProgress = (p: DataReadResult) => {
+    progress = p
+    schedule()
+  }
+
   loadCompressors()
-    .then((compressors) => readPlanData(inspection, source, plan, { compressors, signal: ac.signal, onChunk: (f) => features.push(...f) }))
+    .then((compressors) => readPlanData(inspection, source, plan, { compressors, signal: ac.signal, onChunk, onProgress }))
     .then(
       (result) => {
+        if (frame !== undefined) cancelAnimationFrame(frame)
         if (ac.signal.aborted || !useStore.getState().data.enabled) return
-        setData({ status: 'done', result, features })
+        // 範囲内に描く行が 1 つも無かった場合も、前の計画の行は消す
+        setData({ status: 'done', result, features: features ?? [] })
       },
       (e) => {
+        if (frame !== undefined) cancelAnimationFrame(frame)
         // 中断は新しい計画に置き換わっただけなので、エラーとして見せない
         if (ac.signal.aborted) return
         setData({ status: 'error', error: (e as Error).message })

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { Inspection } from '../../inspect'
 import { MAX_DATA_BYTES, type DataBlocker } from '../../data/readData'
+import { READ_CONCURRENCY } from '../../io/coalesce'
 import { MAX_PAGE_INDEX_ROW_GROUPS, type AccessPlan } from '../../plan/accessPlan'
 import { useStore, type DataState, type PlanStage } from '../../state/store'
 import { levelColor } from '../../util/color'
@@ -209,7 +210,21 @@ function decodeRow(data: DataState, plan: AccessPlan): Row {
   if (data.status === 'blocked' && data.blocker) return { label, count: '読まない', note: BLOCKER_NOTE[data.blocker] }
   if (data.status === 'error') return { label, count: 'エラー', note: data.error }
   const r = data.result
-  if (data.status === 'reading' || !r) return { label, count: '読み込み中…', note: `${formatNumber(plan.requests.length)} 回の Range Request で読む` }
+  if (!r) return { label, count: '読み込み中…', note: `${formatNumber(plan.requests.length)} 回の Range Request で読む` }
+  if (data.status === 'reading') {
+    // 読み終わった Range から描き足す（design.md D38）。ファイル順 = 粗い Level から読むので、全体像が先に出る
+    return {
+      label,
+      count: `${formatNumber(r.doneRequests)} / ${formatNumber(r.requests)} Range`,
+      bytes: r.bytes,
+      note: (
+        <>
+          読み込み中（{Math.round(r.ms)} ms）。ファイル順に同時 {READ_CONCURRENCY} 本で読み、読み終わった Column Chunk から描き足している。いままでに {formatNumber(r.readRows)} 行を decode し、範囲内は{' '}
+          {formatNumber(r.inViewRows)} 行
+        </>
+      ),
+    }
+  }
   return {
     label,
     count: `${formatNumber(r.inViewRows)} / ${formatNumber(r.readRows)} 行`,

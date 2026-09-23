@@ -41,7 +41,7 @@ export function LevelControl() {
 }
 
 function dataStatusText(d: DataState): string {
-  if (d.status === 'reading') return '読み込み中…'
+  if (d.status === 'reading') return d.result ? `読み込み中… ${formatNumber(d.result.doneRequests)} / ${formatNumber(d.result.requests)} Range` : '読み込み中…'
   if (d.status === 'blocked') return '読まない（Access Plan を参照）'
   if (d.status === 'error') return `エラー: ${d.error}`
   if (d.status === 'done' && d.result) return `${formatNumber(d.result.readRows)} 行を読み、範囲内 ${formatNumber(d.result.inViewRows)} 行`

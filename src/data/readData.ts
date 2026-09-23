@@ -32,6 +32,8 @@ export interface DecodedFeature {
 
 export interface DataReadResult {
   requests: number
+  /** 読み終わった Range Request の数。読み込み中の進み具合（design.md D38）で、終わると requests と等しい */
+  doneRequests: number
   bytes: number
   /** decode した行（読んだページが覆う行） */
   readRows: number
@@ -80,13 +82,19 @@ interface ChunkState {
  * Access Plan で決めた範囲を、そのとおりに読んで decode する（design.md D31）。
  * 読むのは選んだ列すべて（Actual のバイト数を Expected と比べるため）だが、decode して描くのは geometry 列だけ。
  * Range は計画と同じ合体方針（重なり・隣接だけ、D22）でまとめ、ファイル順に同時 READ_CONCURRENCY 本で読む。
- * Column Chunk の全ページが揃うたびに onChunk を呼ぶ。
+ * Column Chunk の全ページが揃うたびに onChunk を、Range を 1 つ読み終えるたびに onProgress（その時点の集計）を呼ぶ。
+ * COGP はファイル順が粗い Level → 細かい Level の順なので、呼び出し側が描き足していけば粗い全体像から先に出る（D38）。
  */
 export async function readPlanData(
   ins: Inspection,
   source: RandomAccessSource,
   plan: AccessPlan,
-  opts: { compressors: Compressors; signal?: AbortSignal; onChunk?: (features: DecodedFeature[]) => void },
+  opts: {
+    compressors: Compressors
+    signal?: AbortSignal
+    onChunk?: (features: DecodedFeature[]) => void
+    onProgress?: (progress: DataReadResult) => void
+  },
 ): Promise<DataReadResult> {
   const started = performance.now()
   const geom = geometryColumn(ins)
@@ -110,7 +118,7 @@ export async function readPlanData(
     }
   }
   const runs = coalesce(pieces, (p) => p.range)
-  const result: DataReadResult = { requests: runs.length, bytes: 0, readRows: 0, inViewRows: 0, emptyRows: 0, ms: 0 }
+  const result: DataReadResult = { requests: runs.length, doneRequests: 0, bytes: 0, readRows: 0, inViewRows: 0, emptyRows: 0, ms: 0 }
 
   const decode = (st: ChunkState) => {
     const chunk = ins.file.rowGroups[st.rg].columns[st.col]
@@ -143,12 +151,17 @@ export async function readPlanData(
     // 地図が動いて計画が古くなったら、まだ始めていない read は投げない
     opts.signal?.throwIfAborted()
     const buf = await source.read(run.range.start, run.range.end - run.range.start, purposeOf(ins, run.members), opts.signal)
+    // ローカルファイルの read は途中で止められないので、読み終えた後にも確かめて古い計画の decode を省く
+    opts.signal?.throwIfAborted()
     result.bytes += buf.byteLength
     for (const m of run.members) {
       const st = chunks.get(`${m.rg}:${m.col}`)!
       st.pieces[m.seq] = new Uint8Array(buf, m.range.start - run.range.start, m.range.end - m.range.start)
       if (--st.remaining === 0 && m.col === geom?.index) decode(st)
     }
+    result.doneRequests++
+    // 中断された後の進み具合は、新しい計画の表示を上書きしてしまうので伝えない
+    if (!opts.signal?.aborted) opts.onProgress?.({ ...result, ms: performance.now() - started })
   })
   result.ms = performance.now() - started
   return result
