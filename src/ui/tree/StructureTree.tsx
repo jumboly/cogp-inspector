@@ -99,7 +99,7 @@ export function StructureTree() {
         {file.pageIndex && <Node sel={{ kind: 'pageIndex' }} label="Page Index" meta={formatBytes(file.pageIndex.end - file.pageIndex.start)} />}
         <Node sel={{ kind: 'footer' }} label="Footer（FileMetaData）" meta={formatBytes(file.footer.end - file.footer.start)} defaultOpen>
           <Node sel={{ kind: 'schema' }} label="Schema" meta={`${file.leafColumns.length} 列`} />
-          {geo && <Node sel={{ kind: 'geo' }} label="GeoParquet（geo）" meta={geo.version} />}
+          {geo && <Node sel={{ kind: 'geo' }} label={geo.hasGeo ? 'GeoParquet（geo）' : 'ジオメトリ列（論理型のみ）'} meta={geo.hasGeo ? geo.version : geo.primaryColumn} />}
           {lod && (
             <Node sel={{ kind: 'lod' }} label="COGP（geo.lod）" meta={`${lod.levels.length} Level`} defaultOpen>
               {lod.levels.map((l) => (

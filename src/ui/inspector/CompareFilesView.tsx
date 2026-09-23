@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from 'react'
 import { fileOverlap, levelOverlaps } from '../../diagnose/diagnose'
-import type { Inspection } from '../../inspect'
+import { fileKind, type Inspection } from '../../inspect'
 import { HttpRangeSource } from '../../io/http'
 import { LocalBlobSource } from '../../io/local'
 import type { AccessPlan } from '../../plan/accessPlan'
@@ -15,7 +15,6 @@ function shortName(name: string | undefined): string {
   return sampleOf(name)?.label ?? name.split('/').pop() ?? name
 }
 
-const kindOf = (ins: Inspection) => (ins.lod ? (ins.lod.valid ? 'COGP' : 'COGP（不正な lod）') : ins.geo ? 'GeoParquet' : 'Parquet')
 
 /**
  * 重なり係数（design.md D42）。COGP は Level ごと、通常の GeoParquet はファイル全体で出す。
@@ -72,7 +71,7 @@ export function CompareFilesView({ ins, plan }: { ins: Inspection; plan: AccessP
   const footer = (i: Inspection) => i.file.footer.end - i.file.footer.start
 
   const rows: Row[] = [
-    { label: '種別', cells: [kindOf(ins), kindOf(t)] },
+    { label: '種別', cells: [fileKind(ins), fileKind(t)] },
     { label: 'ファイル全体', cells: [`RG ${formatNumber(ins.file.rowGroups.length)}・${formatBytes(ins.file.size)}`, `RG ${formatNumber(t.file.rowGroups.length)}・${formatBytes(t.file.size)}`] },
     { label: '開くときに読む Footer', cells: pair(footer(ins), footer(t), formatBytes) },
     { label: 'Row Group の重なり係数', cells: [overlapText(ins), overlapText(t)] },

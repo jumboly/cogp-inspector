@@ -327,6 +327,16 @@ D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「お
 | D51 | 診断に足す項目 | MUST: 論理型と geo の CRS が一致、`geometry_types` と `geospatial_types` が一致、version 2.x なら geometry 列が論理型。geo が無いファイルは注意を出す | 2.0 で増えた MUST をそのまま確かめる |
 | D52 | 作る順番 | A. GeoModel の統合（D46・D47・D50）→ B. 日付変更線（D48）→ C. 診断（D51）→ D. サンプルとテスト（D49）。段階ごとに commit + push | A が他のすべての土台。サンプルは作りながら手元の fixture で確かめ、最後に公開用をそろえる |
 
+実装メモ（段階 A）:
+
+- `buildGeoModel(file)`（`src/geo/geoMetadata.ts`）が geo と論理型をまとめる。`GeoColumnModel` に `inGeo`・`geoCrs`（geo 側）・`logical`（論理型の型・crs の文字列・algorithm・解釈した CRS）を足し、`crs` は論理型があれば論理型の CRS にした。
+  表示・計画・描画は `geo.primary.crs` を見るだけなので、呼び出し側は変えずに済んだ。geo の有無は `GeoModel.hasGeo` で見分ける。
+- 論理型の crs は `describeLogicalCrs`（`src/geo/crs.ts`）で解釈する。`CrsInfo` に比較用の識別子 `id` を足し、`sameCrs` で比べる（OGC:CRS84 と EPSG:4326 は同じとみなす。PROJJSON に id が無ければ「比べられない」）。
+- hyparquet は GEOMETRY / GEOGRAPHY 論理型の列を decode するときに GeoJSON に変える。`decodeChunk` では parser を差し替えて WKB のバイト列のまま返し、1.x と同じ `parseWkb` の経路で描く。
+- ファイルの種別の表示は `fileKind` にまとめ、geo の無いファイルは「GeoParquet（geo なし）」、構造ツリーの項目は「ジオメトリ列（論理型のみ）」とした。
+- Column Chunk の Inspector は、論理型の列について min/max に「判定に使わない」と添え、`geospatial_statistics` の bbox（z・m があれば別の行）と `geospatial_types` を出す。
+- `test/fixtures/geo2/` の公開ファイルで確かめた: crs の 4 通りの表記、geo の無いファイルの Row Group bbox、GEOGRAPHY（50 Row Group）、論理型の列の decode。
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text

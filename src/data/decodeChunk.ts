@@ -8,6 +8,10 @@ import { getSchemaPath } from 'hyparquet/src/schema.js'
 import type { RowSpan } from '../geo/pageBbox'
 import type { ColumnChunkModel } from '../parquet/model'
 
+// GEOMETRY / GEOGRAPHY 論理型の列（GeoParquet 2.0）も WKB のバイト列のまま返す。
+// 既定の parser は GeoJSON に変換してしまい、1.x の BYTE_ARRAY 列と経路が分かれる（行ごとの bbox・描画は geometry.ts の 1 か所で行う）
+const PARSERS = { ...DEFAULT_PARSERS, geometryFromBytes: (b: Uint8Array) => b, geographyFromBytes: (b: Uint8Array) => b }
+
 /**
  * 1 つの Column Chunk について読んだページを decode し、値を Row Group 内の行番号と並べて返す。
  *
@@ -25,7 +29,7 @@ export function decodeChunk(schema: SchemaElement[], chunk: ColumnChunkModel, pa
     element: schemaPath[schemaPath.length - 1].element,
     schemaPath,
     codec: meta.codec,
-    parsers: DEFAULT_PARSERS,
+    parsers: PARSERS,
     compressors,
     // WKB などのバイナリ列を文字列にしない（D6 で geo から論理型を補わないので、既定の utf8 だと文字列化される）
     utf8: false,

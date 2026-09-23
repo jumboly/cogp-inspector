@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { fileKind } from '../../inspect'
 import { HttpRangeSource } from '../../io/http'
 import { LocalBlobSource } from '../../io/local'
 import { SAMPLE_ATTRIBUTION, SAMPLES, SAMPLES_AVAILABLE, sampleUrl } from '../../samples'
@@ -22,7 +23,7 @@ export function OpenBar() {
 
   const openUrl = (u: string) => open(() => HttpRangeSource.open(new URL(u, location.href).href))
   const readBytes = reads.reduce((a, r) => a + r.length, 0)
-  const kind = !inspection ? undefined : inspection.lod ? (inspection.lod.valid ? 'COGP' : 'COGP（不正な lod）') : inspection.geo ? 'GeoParquet' : 'Parquet'
+  const kind = inspection && fileKind(inspection)
 
   return (
     <header className="app-header">

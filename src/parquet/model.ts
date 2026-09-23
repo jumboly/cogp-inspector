@@ -18,6 +18,8 @@ export interface LeafColumn {
   logicalType?: string
   convertedType?: string
   repetition?: string
+  /** Parquet ネイティブの GEOMETRY / GEOGRAPHY 論理型の属性。crs は書かれた文字列のまま（解釈は geo/crs.ts） */
+  geoLogical?: { type: 'GEOMETRY' | 'GEOGRAPHY'; crs?: string; algorithm?: string }
 }
 
 export interface ColumnStats {
@@ -84,6 +86,13 @@ export interface FileModel {
 /** i64 は hyparquet で bigint になる。ファイルオフセットは 2^53 を超えないので number に寄せて UI で扱いやすくする */
 const num = (v: bigint | number | undefined): number | undefined => (v === undefined ? undefined : Number(v))
 
+function geoLogical(el: SchemaElement): LeafColumn['geoLogical'] {
+  const lt = el.logical_type
+  if (lt?.type === 'GEOMETRY') return { type: 'GEOMETRY', crs: lt.crs }
+  if (lt?.type === 'GEOGRAPHY') return { type: 'GEOGRAPHY', crs: lt.crs, algorithm: lt.algorithm }
+  return undefined
+}
+
 function leafColumns(schema: SchemaElement[]): LeafColumn[] {
   const leaves: LeafColumn[] = []
   // schema は深さ優先で平坦化された木。num_children を数えながら親のパスを復元する
@@ -101,6 +110,7 @@ function leafColumns(schema: SchemaElement[]): LeafColumn[] {
       name: path.join('.'),
       physicalType: el.type ?? '?',
       logicalType: el.logical_type?.type,
+      geoLogical: geoLogical(el),
       convertedType: el.converted_type,
       repetition: el.repetition_type,
     })

@@ -1,4 +1,6 @@
 import { levelOfRowGroup } from '../../cogp/lod'
+import { sameCrs, type CrsInfo } from '../../geo/crs'
+import { wkbTypeName } from '../../geo/geometryTypes'
 import type { Inspection } from '../../inspect'
 import type { ColumnChunkModel } from '../../parquet/model'
 import { useStore, type Selection } from '../../state/store'
@@ -172,7 +174,17 @@ function GeoView({ ins }: { ins: Inspection }) {
   const geo = ins.geo!
   return (
     <>
-      <KV rows={[['version', geo.version ?? '-'], ['primary_column', geo.primaryColumn ?? '-', '主ジオメトリ列']]} />
+      {geo.hasGeo ? (
+        <KV rows={[['version', geo.version ?? '-'], ['primary_column', geo.primaryColumn ?? '-', '主ジオメトリ列']]} />
+      ) : (
+        <>
+          <p className="muted">
+            geo メタデータがありません。Parquet ネイティブの GEOMETRY / GEOGRAPHY 論理型の列だけを持つファイルです（GeoParquet 2.0 には準拠しませんが、2.0 の reader は読めるとされています）。
+            スキーマ上で最初の geometry 列を主ジオメトリ列として扱います。
+          </p>
+          <KV rows={[['主ジオメトリ列', geo.primaryColumn ?? '-', 'geo が無いので、スキーマ上で最初の geometry 列']]} />
+        </>
+      )}
       {geo.problems.length > 0 && (
         <ul className="problems">
           {geo.problems.map((p) => (
@@ -187,11 +199,14 @@ function GeoView({ ins }: { ins: Inspection }) {
           </h4>
           <KV
             rows={[
-              ['encoding', c.encoding ?? '-', '保存形式（WKB など）'],
-              ['geometry_types', c.geometryTypes.join(', ') || '（指定なし＝任意）'],
-              ['crs', c.crs.label, c.crs.mapProjection ? '地図に表示できます' : 'この CRS は地図表示に未対応です（構造解析のみ）'],
+              ['論理型', c.logical ? `${c.logical.type}${c.logical.algorithm ? `（algorithm ${c.logical.algorithm}）` : ''}` : 'なし', c.logical ? 'Parquet ネイティブの型（GeoParquet 2.0）' : '通常の BYTE_ARRAY 列（GeoParquet 1.x の書き方）'],
+              ['encoding', c.encoding ?? '-', c.inGeo ? '保存形式（WKB など）' : '論理型の値は WKB と決まっている'],
+              ['geometry_types', c.inGeo ? c.geometryTypes.join(', ') || '（指定なし＝任意）' : '-（geo に無い列）'],
+              ['使う CRS', c.crs.label, `${c.logical ? '論理型の crs が正（GeoParquet 2.0）' : 'geo の crs'}。${c.crs.mapProjection ? '地図に表示できます' : 'この CRS は地図表示に未対応です（構造解析のみ）'}`],
+              ...(c.logical ? [['論理型の crs', c.logical.crsText ?? '（省略＝OGC:CRS84）', '書かれている文字列']] as [string, string, string][] : []),
+              ...(c.logical && c.geoCrs ? [['geo の crs', c.geoCrs.label, sameCrsNote(c.logical.crs, c.geoCrs)]] as [string, string, string][] : []),
               ['座標の単位', c.crs.unit, 'COGP の resolution はこの単位'],
-              ['edges', c.edges ?? 'planar（既定）'],
+              ['edges', c.edges ?? (c.inGeo ? 'planar（既定）' : '-（geo に無い列）')],
               ['bbox', c.bbox ? c.bbox.map((v) => v.toFixed(4)).join(', ') : '-', 'ファイル全体の範囲'],
               ['covering.bbox', c.covering ? `${c.covering.xmin.join('.')}, ${c.covering.ymin.join('.')}, ${c.covering.xmax.join('.')}, ${c.covering.ymax.join('.')}` : 'なし', '外接矩形を別の列に持たせ、その統計値で空間の絞り込みをする仕組み'],
             ]}
@@ -199,9 +214,15 @@ function GeoView({ ins }: { ins: Inspection }) {
           {c.crs.raw !== undefined && <RawJson summary="CRS（PROJJSON）" text={toJsonText(c.crs.raw)} />}
         </section>
       ))}
-      <RawJson text={toJsonText(geo.raw)} />
+      {geo.hasGeo && <RawJson text={toJsonText(geo.raw)} />}
     </>
   )
+}
+
+function sameCrsNote(logical: CrsInfo, geoCrs: CrsInfo): string {
+  const same = sameCrs(logical, geoCrs)
+  if (same === undefined) return '識別子が無いので、論理型の crs と同じかを確かめられません'
+  return same ? '論理型の crs と同じ CRS' : '論理型の crs と食い違っています（仕様では同じ CRS を表す MUST。表示には論理型を使う）'
 }
 
 function LodView({ ins }: { ins: Inspection }) {
@@ -344,8 +365,28 @@ function ChunkTable({ ins, chunks, onSelect }: { ins: Inspection; chunks: Column
   )
 }
 
+// GEOMETRY / GEOGRAPHY 列の通常の min/max はソート順が決まっておらず、reader は無視する MUST（design.md D50）
+const GEO_MINMAX_NOTE = 'GEOMETRY / GEOGRAPHY 列の min/max は仕様上 reader が無視するので、判定に使わない'
+
+/** Parquet ネイティブの geospatial_statistics（GeoParquet 2.0 の Row Group 単位の bbox と型） */
+function geoStatRows(c: ColumnChunkModel): [string, string, string?][] {
+  if (!c.column.geoLogical) return []
+  const g = c.raw.meta_data?.geospatial_statistics
+  if (!g) return [['geospatial_statistics', 'なし', 'Row Group 単位の bbox が無いので、この列の統計では読み飛ばせない']]
+  const b = g.bbox
+  const f = (v: number | undefined) => (v === undefined ? '-' : formatValue(v))
+  return [
+    ['geospatial bbox', b ? `x ${f(b.xmin)} 〜 ${f(b.xmax)}、y ${f(b.ymin)} 〜 ${f(b.ymax)}` : 'なし', b && b.xmin > b.xmax ? '日付変更線をまたぐ（xmin > xmax）' : 'Row Group の bbox に使う'],
+    ...(b && (b.zmin !== undefined || b.mmin !== undefined)
+      ? ([['geospatial bbox（z / m）', `z ${f(b.zmin)} 〜 ${f(b.zmax)}、m ${f(b.mmin)} 〜 ${f(b.mmax)}`]] as [string, string][])
+      : []),
+    ['geospatial_types', g.geospatial_types?.length ? g.geospatial_types.map(wkbTypeName).join(', ') : '（空＝不明）', 'ISO WKB の型番号を名前にしたもの'],
+  ]
+}
+
 function ColumnView({ ins, chunk: c }: { ins: Inspection; chunk: ColumnChunkModel }) {
   const role = columnRole(c.column, ins.geo)
+  const geoLogical = c.column.geoLogical
   return (
     <>
       <h3>
@@ -364,8 +405,9 @@ function ColumnView({ ins, chunk: c }: { ins: Inspection; chunk: ColumnChunkMode
           ['非圧縮サイズ', `${formatBytes(c.uncompressedSize)}（圧縮率 ${formatPercent(c.compressedSize, c.uncompressedSize)}）`],
           ['ファイル内の範囲', formatRange(c.range)],
           ['data_page_offset', formatNumber(c.dataPageOffset), '最初のデータ Page の位置'],
-          ['統計 min', c.stats ? statText(c, c.stats.min) : '-', c.stats?.fromDeprecated ? '非推奨の min から取得' : c.stats?.minExact === false ? '正確な値ではない（切り詰め）' : undefined],
-          ['統計 max', c.stats ? statText(c, c.stats.max) : '-'],
+          ['統計 min', c.stats ? statText(c, c.stats.min) : '-', geoLogical ? GEO_MINMAX_NOTE : c.stats?.fromDeprecated ? '非推奨の min から取得' : c.stats?.minExact === false ? '正確な値ではない（切り詰め）' : undefined],
+          ['統計 max', c.stats ? statText(c, c.stats.max) : '-', geoLogical ? GEO_MINMAX_NOTE : undefined],
+          ...geoStatRows(c),
           ['null の数', c.stats?.nullCount !== undefined ? formatNumber(c.stats.nullCount) : '-'],
           ['ColumnIndex', c.columnIndex ? `${formatRange(c.columnIndex)}（${formatBytes(size(c.columnIndex))}）` : 'なし'],
           ['OffsetIndex', c.offsetIndex ? `${formatRange(c.offsetIndex)}（${formatBytes(size(c.offsetIndex))}）` : 'なし'],
