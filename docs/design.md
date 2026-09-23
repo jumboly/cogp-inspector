@@ -1,6 +1,6 @@
 # 設計メモ
 
-2026-09-23 時点の調査結果と決定事項。実装はまだ行っていない。
+2026-09-23 時点の調査結果と決定事項。MVP の実装はまだ行っていない（画面の枠と地図表示のみ）。
 推測を含む箇所は【推測】と明記する。
 
 ## 1. 目的と設計の優先順位
@@ -120,6 +120,18 @@ inspect page index → select pages → read byte ranges → decode` の段階�
 | D2 | リポジトリ名 | `cogp-inspector` | 用途が名前で伝わり、デバッガにも教材にも合う |
 | D3 | パーサ | hyparquet を主に使い、PageHeader の解析だけ自作 | 必要な物理構造がすべて取れ、読んだ range も追跡できることを実データで確認済み。Rust/WASM でも PageHeader は非公開 API のため得るものがない |
 | D4 | Row Group bbox（MVP） | 統計値のみ: covering 列の Row Group 統計 → `geospatial_statistics` の順。無ければ「bbox 不明」 | 初期処理を Footer 読み込みだけに保つ。統計が無いと読み飛ばせない事実もそのまま見せられる |
+
+### 3.1 実装メモ（調査・土台作成で分かったこと）
+
+- hyparquet 1.31 の公開 API: `parquetMetadataAsync`（既定で末尾 512KiB を 1 回 read、足りなければ追加 1 回）、
+  `readColumnIndex` / `readOffsetIndex`、`asyncBufferFromUrl`（HEAD でサイズ取得）。AsyncBuffer は `{ byteLength, slice(start, end) }`。
+- PageHeader を解析する `parquetHeader`（src/column.js）は非公開。`hyparquet/src/thrift.js` の `deserializeTCompactProtocol` は
+  package.json の `exports`（`./src/*.js`）経由で import でき、結果は `field_N` 形式の生オブジェクトになる（非公式 API なのでバージョン固定が必要）。
+- 公式サンプル実測: RG2 `bbox.xmin` は DATA_PAGE(v1) 23 枚、各ヘッダ 22B、2,048 値。OffsetIndex の `compressed_page_size` はヘッダ込み。
+  id 列先頭は DICTIONARY_PAGE（8,103 件、ヘッダ 19B）。ページ単位の Statistics は無い。
+- 背景地図は API キー不要の OSM ラスタタイル（彩度を落として表示）を仮採用。変更可。
+- MapLibre v6 + Vite: `optimizeDeps.exclude: ['maplibre-gl']` と、`?worker&url` で worker をバンドルして `setWorkerUrl` に渡す対処が必要（src/ui/map/MapView.tsx）。
+- GitHub Pages の公開先は独自ドメイン https://www.jumboly.jp/cogp-inspector/（公式サンプルの CORS は不許可を確認済み）。
 
 ## 4. アーキテクチャ案（MVP）
 
