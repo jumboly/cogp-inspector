@@ -112,6 +112,12 @@ uv run scripts/make_samples.py --source data/pois.cogp.parquet --cogp /path/to/c
 uv run scripts/make_samples.py   # --cogp を省くと、既存の COGP から 2.0 版だけを作り直す
 ```
 
+作り直したファイルは R2 のバケット `cogp-inspector-samples` に上書きします（`npx wrangler login` のあと）。
+
+```sh
+npx wrangler r2 object put cogp-inspector-samples/tokyo-id.parquet --file samples/tokyo-id.parquet --remote
+```
+
 GeoParquet 2.0 の小さなテスト用ファイル（apache/parquet-testing ほか、Apache License 2.0）は `test/fixtures/geo2/` にあります。
 
 開発では COGP 公式サンプル（OSM 由来の POI、約 2.2GB）を `data/` に置いて使います。
