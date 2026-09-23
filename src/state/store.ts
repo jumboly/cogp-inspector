@@ -9,6 +9,7 @@ import { inspect, type Inspection } from '../inspect'
 import { pageBboxesFromCache, pageBboxIndexWants, type PageBboxes } from '../geo/pageBbox'
 import { PageCache, type ChunkPages } from '../parquet/pages'
 import { defaultColumns, planAccess, type AccessPlan, type PlanInput } from '../plan/accessPlan'
+import { addCost, incomparable, mapColumns, ZERO_COST, type CumulativeCost } from '../plan/compareFiles'
 
 /**
  * Tree / Map / Inspector / ByteMap が共有する「いま何を見ているか」。
@@ -78,6 +79,32 @@ export interface DataState {
 
 const DATA_OFF: DataState = { enabled: false, status: 'idle', features: [] }
 
+/**
+ * 比較対象（design.md D44）。主ファイルとは別に 1 つ開き、Footer と Page Index だけを読む（実データは読まない）。
+ * 同じ表示範囲で Access Plan を計算し、主ファイルの funnel と並べる
+ */
+export interface CompareState {
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  name?: string
+  error?: string
+  inspection?: Inspection
+  pageCache?: PageCache
+  /** 比較対象で実際に読んだ範囲。主ファイルの Range 記録・Physical File Map に混ぜないため別に持つ */
+  reads: ReadRecord[]
+  planStatus: 'idle' | 'running' | 'ready' | 'error'
+  plan?: AccessPlan
+  planError?: string
+  /** 同じ表示範囲で比べられない理由（CRS が違うなど）。あれば計画は計算しない */
+  incomparable?: string
+  /** 主ファイルで選んだ列のうち、比較対象に同じ名前の列が無いもの */
+  missingColumns: string[]
+  /** Simulator を ON にしてから（または比較対象・読む列を変えてから）の累計。両方の計画がそろった回だけ足す */
+  totals: { main: CumulativeCost; target: CumulativeCost }
+}
+
+const NO_TOTALS = { main: ZERO_COST, target: ZERO_COST }
+const COMPARE_OFF: CompareState = { status: 'idle', reads: [], planStatus: 'idle', missingColumns: [], totals: NO_TOTALS }
+
 // 展開ライブラリは「実データを読む」を初めて ON にしたときに読み込む（初期表示のバンドルを増やさない：D34）
 let compressorsPromise: Promise<Compressors> | undefined
 const loadCompressors = () => (compressorsPromise ??= import('hyparquet-compressors').then((m) => m.compressors))
@@ -101,6 +128,7 @@ interface State {
   reads: ReadRecord[]
   simulator: SimulatorState
   data: DataState
+  compare: CompareState
   selection: Selection | null
   selectOrigin?: SelectOrigin
   /** 地図に表示する Level（null = すべての Row Group を表示） */
@@ -119,6 +147,8 @@ interface State {
   setDataEnabled: (enabled: boolean) => void
   /** 地図から呼ぶ。表示範囲と縮尺が変わるたびに Access Plan を計算し直す */
   runSimulation: (view: Omit<PlanInput, 'columns'>) => void
+  openCompare: (open: () => Promise<RandomAccessSource>) => Promise<void>
+  closeCompare: () => void
 }
 
 // 地図を続けて動かしたとき、古い計算の結果で新しい結果を上書きしないための通し番号
@@ -138,13 +168,14 @@ export const useStore = create<State>((set, get) => ({
   hoverSpan: null,
   simulator: SIM_OFF,
   data: DATA_OFF,
+  compare: COMPARE_OFF,
   selection: null,
   viewLevel: null,
   hoverRowGroup: null,
 
   async open(openSource) {
     abortData()
-    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], simulator: SIM_OFF, data: DATA_OFF, selection: null, viewLevel: null, hoverRowGroup: null })
+    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], simulator: SIM_OFF, data: DATA_OFF, compare: COMPARE_OFF, selection: null, viewLevel: null, hoverRowGroup: null })
     try {
       const raw = await openSource()
       set({ sourceName: raw.name, sourceKind: raw.kind })
@@ -215,18 +246,20 @@ export const useStore = create<State>((set, get) => ({
     if (!inspection) return
     if (!enabled) {
       abortData()
-      set({ simulator: { ...SIM_OFF, columns: simulator.columns }, data: DATA_OFF, viewLevel: null, selection: get().selection?.kind === 'plan' ? { kind: 'file' } : get().selection })
+      set({ simulator: { ...SIM_OFF, columns: simulator.columns }, data: DATA_OFF, compare: resetComparePlan(get().compare), viewLevel: null, selection: get().selection?.kind === 'plan' ? { kind: 'file' } : get().selection })
       return
     }
     // 計算は地図が表示範囲を渡したとき（runSimulation）に始まる
     set({
       simulator: { ...SIM_OFF, enabled: true, columns: simulator.columns.length ? simulator.columns : defaultColumns(inspection) },
+      compare: resetComparePlan(get().compare),
       selection: { kind: 'plan' },
       selectOrigin: 'inspector',
     })
   },
   setSimulatorColumns(columns) {
-    set({ simulator: { ...get().simulator, columns } })
+    // 読む列が変わると 1 回あたりの量が変わるので、累計は数え直す
+    set({ simulator: { ...get().simulator, columns }, compare: { ...get().compare, totals: NO_TOTALS } })
     const last = get().simulator.lastView
     if (last) get().runSimulation(last)
   },
@@ -255,7 +288,19 @@ export const useStore = create<State>((set, get) => ({
     // 中断した計画の進み具合（n / m Range）を、新しい計画の計算中に出し続けないよう消す
     const { data } = get()
     if (data.status === 'reading') set({ data: { ...data, result: undefined } })
-    planAccess(inspection, pageCache, { ...view, columns: simulator.columns }).then(
+    const mainPlan = planAccess(inspection, pageCache, { ...view, columns: simulator.columns })
+    const targetCache = get().compare.pageCache
+    const targetPlan = planCompare(view, simulator.columns, token)
+    // 累計は、同じ表示範囲について両方の計画がそろった回だけ足す（片方だけ足すと回数がずれて比べられない）
+    void Promise.all([mainPlan, targetPlan]).then(
+      ([m, t]) => {
+        const c = get().compare
+        if (token !== simToken || !t || c.pageCache !== targetCache) return
+        set({ compare: { ...c, totals: { main: addCost(c.totals.main, m), target: addCost(c.totals.target, t) } } })
+      },
+      () => undefined,
+    )
+    mainPlan.then(
       (plan) => {
         if (token !== simToken || !get().simulator.enabled) return
         // Simulator の間は、選ばれた Level の prefix を地図に表示する（手動の Level 選択は無効：design.md D19）
@@ -268,7 +313,60 @@ export const useStore = create<State>((set, get) => ({
       },
     )
   },
+
+  async openCompare(openSource) {
+    const pageCache = get().pageCache
+    set({ compare: { ...COMPARE_OFF, status: 'loading' } })
+    const setCompare = (patch: Partial<CompareState>) => set({ compare: { ...get().compare, ...patch } })
+    try {
+      const raw = await openSource()
+      setCompare({ name: raw.name })
+      const source = new TracedSource(raw, (r) => setCompare({ reads: [...get().compare.reads, r] }))
+      const inspection = await inspect(source)
+      // 開いている間に主ファイルを開き直していたら、古い比較対象は捨てる
+      if (get().pageCache !== pageCache || get().compare.name !== raw.name) return
+      const main = get().inspection
+      setCompare({ status: 'ready', inspection, pageCache: new PageCache(source, inspection.file), incomparable: main ? incomparable(main, inspection) : undefined })
+      const last = get().simulator.lastView
+      if (get().simulator.enabled && last) get().runSimulation(last)
+    } catch (e) {
+      if (get().pageCache === pageCache) setCompare({ status: 'error', error: (e as Error).message })
+    }
+  },
+  closeCompare: () => set({ compare: COMPARE_OFF }),
 }))
+
+/** Simulator の ON/OFF で計画と累計を捨てる（比較対象のファイルは開いたまま） */
+function resetComparePlan(c: CompareState): CompareState {
+  return { ...c, planStatus: 'idle', plan: undefined, planError: undefined, missingColumns: [], totals: NO_TOTALS }
+}
+
+/**
+ * 比較対象の Access Plan を、主ファイルと同じ表示範囲・縮尺・列（名前で対応づけ）で計算する。
+ * 比較対象が無い・比べられないときは undefined
+ */
+function planCompare(view: Omit<PlanInput, 'columns'>, mainColumns: number[], token: number): Promise<AccessPlan | undefined> {
+  const { inspection: main, compare } = useStore.getState()
+  const { inspection, pageCache } = compare
+  if (!main || !inspection || !pageCache || compare.status !== 'ready' || compare.incomparable) return Promise.resolve(undefined)
+  const setCompare = (patch: Partial<CompareState>) => {
+    const c = useStore.getState().compare
+    // 計算中に比較対象を閉じた・開き直したら捨てる
+    if (c.pageCache === pageCache) useStore.setState({ compare: { ...c, ...patch } })
+  }
+  const { columns, missing } = mapColumns(main, inspection, mainColumns)
+  setCompare({ planStatus: 'running', missingColumns: missing })
+  const p = planAccess(inspection, pageCache, { ...view, columns })
+  p.then(
+    (plan) => {
+      if (token === simToken) setCompare({ planStatus: 'ready', plan, planError: undefined })
+    },
+    (e) => {
+      if (token === simToken) setCompare({ planStatus: 'error', planError: (e as Error).message })
+    },
+  )
+  return p.catch(() => undefined)
+}
 
 /** 計画どおりに実データを読み、decode して地図に描く行を store に入れる */
 function readData(plan: AccessPlan) {

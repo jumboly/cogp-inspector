@@ -1,6 +1,6 @@
 # 設計メモ
 
-2026-09-23 時点の調査結果と決定事項。MVP・Phase 2 は実装済み（実装時の判断は §3.2・§3.3）。Phase 3 は判断を §3.4 に記録し、段階ごとに実装中。
+2026-09-23 時点の調査結果と決定事項。MVP・Phase 2 は実装済み（実装時の判断は §3.2・§3.3）。Phase 3 も実装済み（判断と実装メモは §3.4）。
 推測を含む箇所は【推測】と明記する。
 
 ## 1. 目的と設計の優先順位
@@ -264,6 +264,29 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
 - D42 の説明を実装で改めた。重なり係数は、1 を超えた分が重なり、1 未満は Row Group の間の隙間（データの無い範囲）を表す。「1 に近いほど重なりが少ない」は 1 未満の側では当たらない。
 - 公式サンプルの結果: MUST はすべて満たす（「各行を 1 回だけ」は未確認）。RG 0 は 8,103 行（中央値 65,536 行）。Level 0 はデータ全体の範囲の 100 % を覆う。重なり係数は Level 0〜2 で 1.00、細かい Level ほど下がり 0.74〜0.78。どの Level も 1 を超えないので Row Group どうしはほとんど重ならず、1 未満は海などの隙間による。
 
+実装メモ（段階 E）:
+
+- サンプルは `scripts/make_samples.py`（uv で実行する Python。pyarrow 25 + numpy）で作る。公式サンプルから東京 23 区付近（139.56〜139.92°E、35.52〜35.82°N、152,127 行）を切り出し、
+  (1) id 順、(2) Hilbert 順（bbox 中心を 2^16 格子に置いた Hilbert 番号、同じ番号は id 順）を pyarrow で書き、(3) は (1) を cogp v1.0.0（仕様リポジトリのリリースのバイナリ）で変換する。
+  cogp-rs 単体のリポジトリ（Kanahiro/cogp-rs）は仕様リポジトリに統合されてアーカイブ済みで、古い `cogp` メタデータ（`gsd`）を書くので使わない。
+- そろえた条件: Row Group 8,192 行・ページ 1,024 行・ZSTD レベル 3・geometry と bbox は辞書なし・Page Index あり。Row Group を公式サンプルの 65,536 行より小さくしたのは、15 万行では通常 GeoParquet が 3 個の Row Group にしかならず、Row Group 単位の読み飛ばしの差が見えないため。
+  そろえられなかった点: pyarrow は ColumnIndex を全列に書く（cogp は bbox 列だけ）。`store_schema=False` で ARROW:schema を省き、Footer の大きさを近づけた（19.3KB / 19.1KB / 28.7KB。COGP は Row Group が多い分大きい）。
+- 生成結果: 元の順 12.2MB・19 RG、Hilbert 順 12.2MB・19 RG、COGP 11.8MB・28 RG・16 Level（z0〜z16 のうち空の Level が 1 つ落ちた）。Level 0 は 1 行だけ（範囲が 0.36° 四方と狭く、最も粗い Level の間引きの格子に 1 点しか入らない）。サイズは 20MB（D43）を下回り、`public/samples/` に置いて Git で管理する。
+- 重なり係数（D42）: 元の順は全体で 18.91（19 個の Row Group がどれもほぼデータ全体を覆う）、Hilbert 順は 1.31、COGP は Level ごとに 0.96〜1.00。lod の無いファイル向けに、診断の目安に「全 Row Group の重なり係数」を足した（COGP では Level どうしが同じ範囲を覆うので出さない）。
+- 比較対象は `compare` として store に持ち、主ファイルとは別の `TracedSource`・`PageCache` で読む。主ファイルの Range 記録・Physical File Map・Expected vs Actual に比較対象の read を混ぜないため。主ファイルを開き直すと比較対象も閉じる（別の地域のファイルと比べても意味が薄いため）。
+- 表示範囲は主ファイルの CRS で渡されるので、比較対象の地図投影が違えば計算せず理由を出す。読む列は番号ではなく名前で対応づける（cogp は bbox 列を作り直すので、並びがファイルごとに違いうる）。
+- 累計は、同じ表示範囲について両方の計画がそろった回だけ足す（片方だけ足すと回数がずれて比べられない）。比べるのは両方とも推定で、Page Index（新たに読む分）とデータページの Range Request 数・バイト数。Simulator の ON/OFF、比較対象の変更、読む列の変更で数え直す。
+- 同梱サンプルを開いているときは、比較対象の候補として残りの 2 つのサンプルをボタンで出す（D45）。ヘッダーに「サンプル: 元の順 / Hilbert 順 / COGP」を常に置き、HTTP Range で開く（Vite の public 配信・GitHub Pages とも Range に 206 で応える）。
+- 同梱サンプルでの推定（既定の 5 列、`test/samples.test.ts` で CI でも確かめる）:
+
+  | 表示範囲 | 元の順 | Hilbert 順 | COGP |
+  |---|---|---|---|
+  | 23 区全体（0.0005°/px） | 5.97MB・19 回 | 5.42MB・19 回 | 0.41MB・9 回（Level 8） |
+  | 新宿区くらい（0.00008°/px） | 5.97MB・19 回 | 0.72MB・17 回 | 0.83MB・76 回（Level 11） |
+  | 渋谷駅付近（0.00002°/px） | 5.97MB・19 回 | 0.25MB・15 回 | 0.51MB・60 回（Level 13） |
+
+  元の順は拡大しても何も読み飛ばせない。Hilbert 順は拡大すると Row Group・ページで絞れるが、全体表示では全行を読む。COGP は全体表示で Level による prefix が効き、拡大すると粗い Level から続く prefix の分だけ Hilbert 順より多く読む。§1 の「なぜ空間的にまとめるのか」「なぜ Level があるのか」がこの 3 列で分かれて見える。
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
@@ -299,12 +322,13 @@ cogp-inspector/
 │ ├ parquet/   footer.ts, model.ts, pageIndex.ts, pageHeader.ts, pages.ts（Index・ヘッダの読み込みとキャッシュ）
 │ ├ geo/       geoMetadata.ts, crs.ts, bbox.ts, pageBbox.ts
 │ ├ cogp/      lod.ts（検証・prefix）
-│ ├ plan/      accessPlan.ts, viewport.ts
+│ ├ plan/      accessPlan.ts, viewport.ts, compare.ts（Expected vs Actual）, compareFiles.ts（2 ファイルの比較）
 │ ├ data/      readData.ts（計画どおりに読む）, decodeChunk.ts, geometry.ts（WKB）
 │ ├ state/     store.ts（ファイル・選択・trace の共有状態。zustand を想定）
 │ ├ ui/        layout/, tree/, map/, inspector/, bytemap/, help/
 │ └ main.tsx
-├ test/fixtures/   小さな COGP / 通常 GeoParquet（issue 01 で生成）
+├ public/samples/  比較用サンプル 3 種類（元の順 / Hilbert 順 / COGP、各約 12MB。テストでも使う）
+├ scripts/         make_samples.py（サンプルの生成）
 ├ data/            大容量サンプル（Git 管理外、ハードリンク）
 ├ docs/            設計メモ・Issue 下書き
 └ .github/workflows/pages.yml
@@ -318,4 +342,4 @@ cogp-inspector/
   GeoParquet メタデータ、`geo.lod` 解析、Level 一覧、Level と Row Group の対応、Row Group bbox の地図描画、
   Row Group Inspector、Physical File Map 基本版
 - Phase 2（実装済み）: Column Chunk 詳細、Page、Dictionary、Page Index、Page bbox、Page pruning、Access Simulator、Range Request 可視化
-- Phase 3（設計済み・§3.4）: 実データ描画、progressive rendering、Expected vs Actual 比較、診断、比較用サンプルの生成と通常 GeoParquet との比較
+- Phase 3（実装済み・§3.4）: 実データ描画、progressive rendering、Expected vs Actual 比較、診断、比較用サンプルの生成と通常 GeoParquet との比較

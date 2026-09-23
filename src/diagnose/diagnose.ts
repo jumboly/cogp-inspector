@@ -64,23 +64,33 @@ export interface LevelOverlap {
   coefficient?: number
 }
 
+/** RG from..to（含む）の重なり係数。bbox が無い Row Group は計算に入れない */
+function overlapOf(ins: Inspection, from: number, to: number): { withBbox: number; coefficient?: number } {
+  const bs: Bbox[] = []
+  for (let rg = Math.max(from, 0); rg <= Math.min(to, ins.file.rowGroups.length - 1); rg++) {
+    const b = ins.rowGroupBboxes[rg]?.bbox
+    if (b) bs.push(b)
+  }
+  const all = enclose(bs)
+  const total = all ? area(all) : 0
+  return { withBbox: bs.length, coefficient: total > 0 ? bs.reduce((a, b) => a + area(b), 0) / total : undefined }
+}
+
 /** Level ごとの重なり係数。Footer の Row Group 統計だけで計算できる */
 export function levelOverlaps(ins: Inspection): LevelOverlap[] {
-  return (ins.lod?.levels ?? []).map((l) => {
-    const bs: Bbox[] = []
-    for (let rg = Math.max(l.newFrom, 0); rg <= Math.min(l.rowGroupEnd, ins.file.rowGroups.length - 1); rg++) {
-      const b = ins.rowGroupBboxes[rg]?.bbox
-      if (b) bs.push(b)
-    }
-    const all = enclose(bs)
-    const total = all ? area(all) : 0
-    return {
-      level: l.level,
-      rowGroups: Math.max(0, l.rowGroupEnd - l.newFrom + 1),
-      withBbox: bs.length,
-      coefficient: total > 0 ? bs.reduce((a, b) => a + area(b), 0) / total : undefined,
-    }
-  })
+  return (ins.lod?.levels ?? []).map((l) => ({
+    level: l.level,
+    rowGroups: Math.max(0, l.rowGroupEnd - l.newFrom + 1),
+    ...overlapOf(ins, l.newFrom, l.rowGroupEnd),
+  }))
+}
+
+/**
+ * ファイル全体（全 Row Group）の重なり係数。lod の無い通常の GeoParquet で、並び順の違い（元の順・Hilbert 順）を
+ * Level ごとの値と同じ物差しで比べるため（design.md D42）。COGP では Level どうしが同じ範囲を覆うので大きくなる
+ */
+export function fileOverlap(ins: Inspection): { rowGroups: number; withBbox: number; coefficient?: number } {
+  return { rowGroups: ins.file.rowGroups.length, ...overlapOf(ins, 0, ins.file.rowGroups.length - 1) }
 }
 
 const median = (xs: number[]) => {
@@ -208,6 +218,18 @@ export function diagnose(ins: Inspection, pageBboxOf: (rg: number) => PageBboxes
   }
 
   // ---- 仕様外の目安 ----
+  if (!lod && n > 1) {
+    const o = fileOverlap(ins)
+    items.push({
+      id: 'file-overlap',
+      group: 'hint',
+      title: 'Row Group が空間的にまとまっている',
+      verdict: 'info',
+      value: o.coefficient === undefined ? '計算できない（bbox が無い・範囲の面積が 0）' : `全 Row Group の重なり係数 ${o.coefficient.toFixed(2)}${o.withBbox < o.rowGroups ? `（bbox のある ${fmt(o.withBbox)} 個で計算）` : ''}`,
+      note: 'COGP の Level ごとの重なり係数と同じ物差しを、ファイル全体に当てたもの。行が場所と無関係に並ぶと、どの Row Group もデータ全体を覆うので Row Group 数に近づき、表示範囲が狭くても Row Group を読み飛ばせない。空間的に並べると 1 に近づく',
+      target: { kind: 'rowGroups' },
+    })
+  }
   items.push({
     id: 'covering',
     group: 'hint',

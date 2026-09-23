@@ -7,6 +7,7 @@ import { useStore, type DataState, type PlanStage } from '../../state/store'
 import { levelColor } from '../../util/color'
 import { formatBytes, formatNumber, formatPercent } from '../../util/format'
 import { columnRole, ROLE_LABEL } from './columnRole'
+import { CompareFilesView } from './CompareFilesView'
 import { PlanComparisonView } from './PlanComparisonView'
 
 /**
@@ -168,6 +169,7 @@ function Funnel({ ins, plan, focus, running }: { ins: Inspection; plan: AccessPl
         {data.enabled ? '5. までの「読む量」は推定、6. は実際に読んで decode した結果です。' : '「読む量」はデータページの推定で、まだ読んでいません（実際に読んだのは Page Index だけ）。'}
       </p>
       <PlanComparisonView />
+      <CompareFilesView ins={ins} plan={plan} />
       <h4>読む Row Group（{formatNumber(plan.rowGroups.length)} 個）</h4>
       <table className="table">
         <thead>

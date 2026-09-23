@@ -12,4 +12,4 @@
 - 2 ファイルを同時に開く UI
 
 ## 結論
-Phase 3 段階 E（design.md D44）。「比較対象」を 1 つ追加で開き（Footer と Page Index のみ）、同じ表示範囲の funnel を横に並べる。単位は「現在の表示範囲」と「Simulator ON からの累計」の 2 通り。
+Phase 3 段階 E で対応済み（design.md D44）。Access Plan に「ファイルの比較」を追加し、「比較対象」を 1 つ追加で開いて（Footer と Page Index のみ）、同じ表示範囲の funnel を横に並べる。単位は「現在の表示範囲」と「Simulator ON からの累計」の 2 通り。

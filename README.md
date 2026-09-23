@@ -42,8 +42,9 @@ HTTP Range Request で読めます。
 
 ## 開発ステータス
 
-**Phase 2 完了。** ファイルを開くと Footer だけを読み、Parquet・GeoParquet・COGP の構造を表示します。
+**Phase 3 完了。** ファイルを開くと Footer だけを読み、Parquet・GeoParquet・COGP の構造を表示します。
 Page・Page Index を必要な分だけ読んで表示し、Access Simulator で地図の表示範囲から読む範囲を推定します。
+推定どおりに実データを読んで描き、推定と実測を突き合わせ、通常の GeoParquet と読む量を比べられます。
 公開版: <https://www.jumboly.jp/cogp-inspector/>
 
 - [x] 仕様・既存実装・ライブラリの調査（[docs/design.md](docs/design.md)）
@@ -51,7 +52,7 @@ Page・Page Index を必要な分だけ読んで表示し、Access Simulator で
 - [x] 空のプロジェクト（Vite + React + TypeScript + MapLibre）と GitHub Pages への自動公開設定
 - [x] MVP 実装（ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
 - [x] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
-- [ ] Phase 3（実データ描画、比較、診断）
+- [x] Phase 3（実データ描画、Expected vs Actual、診断、比較用サンプルと通常 GeoParquet との比較）
 
 未対応の課題は [docs/issues/](docs/issues/) に下書きし、GitHub Issue として管理します。
 
@@ -59,17 +60,18 @@ Page・Page Index を必要な分だけ読んで表示し、Access Simulator で
 
 | 画面 | できること |
 |---|---|
-| ヘッダー | ローカルファイル / URL（HTTP Range Request）で開く。実際に読んだ回数とバイト数を表示（クリックで一覧） |
+| ヘッダー | ローカルファイル / URL（HTTP Range Request）/ 同梱サンプルで開く。診断の要約と、実際に読んだ回数とバイト数を表示（クリックで一覧） |
 | Structure（左） | ファイルの先頭 → 末尾の並びで構造をたどる。Schema・GeoParquet・COGP の情報が末尾の Footer の中にあることが階層で分かる。Column Chunk を開くとページが並ぶ |
 | 地図（中央） | Row Group の bbox を Level の色で描画。表示 Level を選ぶと、その Level で読む prefix（RG 0〜row_group_end）だけを表示し、その Level で増えた Row Group を太線で強調。クリックで Row Group を選択。Row Group を選ぶとページ単位の bbox（Page bbox）も青で描く |
-| Access Simulator（地図の左上） | ON にすると、地図を動かすたびに「Level 選択 → Row Group の絞り込み → Page Index → ページの絞り込み → Range の合体」の順に読む範囲を推定し、Inspector に段階ごとの候補数とバイト数を表示。読む列も選べる |
+| Access Simulator（地図の左上） | ON にすると、地図を動かすたびに「Level 選択 → Row Group の絞り込み → Page Index → ページの絞り込み → Range の合体」の順に読む範囲を推定し、Inspector に段階ごとの候補数とバイト数を表示。読む列も選べる。「実データを読む」を ON にすると推定どおりに読んで geometry を描き、推定（Expected）と実測（Actual）を並べる。「比較対象」を開くと、同じ表示範囲での読む量を 2 ファイルで比べる |
 | Inspector（右） | 選んだ要素の詳細と、Parquet / GeoParquet / COGP のどの層の何なのかの解説。Column Chunk ではページ一覧・辞書ページ・ColumnIndex の min/max、Row Group では Page bbox の一覧 |
 | Physical File Map（下） | ファイル全体のバイト配置（Row Group・Column Chunk・Page・Page Index・Footer）、Simulator が推定した読む予定の範囲、実際に読んだ範囲。ホイールで拡大、ドラッグで移動、クリックで選択 |
+| 診断（ヘッダーの「診断」） | Footer だけから、COGP 仕様の MUST・SHOULD と仕様外の目安を判定。クリックで該当する Row Group などを選ぶ |
 | Range Request 一覧（ヘッダーの「読み込み N 回」） | 実際に読んだ範囲を目的別に集計し、操作ごとのまとまりで時系列（ウォーターフォール）に表示。クリックで Physical File Map にその範囲を示す |
 
 初期処理で読むのは末尾 8 バイトと Footer だけです（公式サンプルでは 2 回・482KB、ファイルの 0.022%）。
 Page Index とページヘッダは、Column Chunk・Row Group を選んだときや Simulator の候補に残ったときに、その分だけ読みます。
-データページ（Row Group の中身）はまだ読みません（Phase 3 で対応）。
+データページ（Row Group の中身）は、Access Simulator で「実データを読む」を ON にしたときだけ読みます。
 
 ## 起動方法
 
@@ -83,6 +85,25 @@ npm run build   # 静的ファイルを dist/ に出力（main への push で G
 ```
 
 ### サンプルデータ
+
+ヘッダーの「サンプル」から、同梱の比較用サンプル 3 種類を開けます（`public/samples/`、各約 12MB）。
+COGP 公式サンプルから東京 23 区付近の POI（152,127 行）を切り出し、並び順だけを変えたものです。
+
+| ボタン | ファイル | 並び順 |
+|---|---|---|
+| 元の順 | `tokyo-id.parquet` | 通常の GeoParquet。id 順（場所とはほぼ無関係） |
+| Hilbert 順 | `tokyo-hilbert.parquet` | 通常の GeoParquet。Hilbert 曲線の順（近い地物が同じ Row Group に入る） |
+| COGP | `tokyo.cogp.parquet` | cogp v1.0.0 で変換した COGP（16 Level） |
+
+行・列・圧縮・Row Group（8,192 行）とページ（1,024 行）の大きさはそろえてあります。
+COGP を開いて Access Simulator を ON にし、「比較対象」に残りの 2 つを選ぶと、同じ表示範囲で読む量を比べられます。
+データは © OpenStreetMap contributors で、[ODbL](https://opendatacommons.org/licenses/odbl/) のもとで提供されています。
+
+作り直すときは、公式サンプルを `data/` に置き、[cogp v1.0.0](https://github.com/Kanahiro/cloud-optimized-geoparquet/releases/tag/v1.0.0) の CLI を用意して実行します（[uv](https://docs.astral.sh/uv/) が必要）。
+
+```sh
+uv run scripts/make_samples.py --source data/pois.cogp.parquet --cogp /path/to/cogp
+```
 
 開発では COGP 公式サンプル（OSM 由来の POI、約 2.2GB）を `data/` に置いて使います。
 `data/` は Git 管理外です。
@@ -103,4 +124,4 @@ curl -o data/pois.cogp.parquet https://cogp-demo.spatialty.io/v1.0.0/pois.cogp.p
 
 ## ライセンス
 
-未定
+コードのライセンスは未定です。同梱サンプル（`public/samples/`）のデータは © OpenStreetMap contributors（ODbL）です。

@@ -743,3 +743,20 @@ a {
   min-width: 11em;
   color: var(--muted);
 }
+/* ---- ファイルの比較（design.md D44・D45） ---- */
+.sample-buttons {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.compare-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.compare-target {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
