@@ -169,6 +169,14 @@ D14〜D22 はユーザーと 1 問ずつ議論して決定。D23 以降は「以
 - 公式サンプルの辞書ページヘッダは RG0 で 19B（8,103 件）、RG2 で 20B（46,751 件）。ヘッダ長は varint の桁数で変わる。
 - parquet-rs は同じ Row Group の OffsetIndex を列順に隙間なく書くため、1 Row Group 8 列分の OffsetIndex は合体して 1 回の read になる。
 - PageHeader の解析は hyparquet の内部モジュール（`src/thrift.js`, `src/constants.js`）に依存するため、hyparquet を `1.31.1` に固定した。
+- ページ一覧と Page bbox が同じ Index を同時に要求することがあるため、PageCache は読み込み中の Index も共有して二重に読まない。
+
+実装メモ（段階 B）:
+
+- Page bbox は Row Group（またはその中の Column Chunk・Page）を選んだときに、covering 4 列の OffsetIndex と ColumnIndex を読んで求める。
+  公式サンプルでは 4 列の ColumnIndex、4 列の OffsetIndex がそれぞれ隣接しているので、合体して計 2 回の read で済む。
+- 公式サンプルの RG300 は 32 の行範囲（2,048 行ずつ）で、4 列のページ境界はそろっている（D17 の【推測】どおり）。
+- 値がすべて null のページや、min/max が数値でないページは bbox 不明として扱い、読み飛ばさない。
 
 ## 4. アーキテクチャ（MVP で実装済み）
 

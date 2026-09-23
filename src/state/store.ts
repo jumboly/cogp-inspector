@@ -4,6 +4,7 @@ import { SourceError } from '../io/errors'
 import type { RandomAccessSource, ReadRecord } from '../io/source'
 import { TracedSource } from '../io/traced'
 import { inspect, type Inspection } from '../inspect'
+import { pageBboxesFromCache, pageBboxIndexWants, type PageBboxes } from '../geo/pageBbox'
 import { PageCache, type ChunkPages } from '../parquet/pages'
 
 /**
@@ -44,6 +45,10 @@ interface State {
   pageCache?: PageCache
   /** Column Chunk ごとのページ一覧（キーは chunkKey）。選んだ Column Chunk の分だけ読む */
   chunkPages: Record<string, Loadable<ChunkPages>>
+  /** Row Group ごとの Page bbox（キーは Row Group 番号）。選んだ Row Group の分だけ読む */
+  pageBboxes: Record<number, Loadable<PageBboxes>>
+  /** Inspector の Page bbox 一覧でホバー中の行範囲（地図で強調する） */
+  hoverSpan: { rg: number; span: number } | null
   reads: ReadRecord[]
   selection: Selection | null
   selectOrigin?: SelectOrigin
@@ -55,18 +60,22 @@ interface State {
   setViewLevel: (level: number | null) => void
   setHoverRowGroup: (rg: number | null) => void
   loadChunkPages: (rg: number, col: number) => void
+  loadPageBboxes: (rg: number) => void
+  setHoverSpan: (h: { rg: number; span: number } | null) => void
 }
 
 export const useStore = create<State>((set, get) => ({
   status: 'idle',
   reads: [],
   chunkPages: {},
+  pageBboxes: {},
+  hoverSpan: null,
   selection: null,
   viewLevel: null,
   hoverRowGroup: null,
 
   async open(openSource) {
-    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, reads: [], selection: null, viewLevel: null, hoverRowGroup: null })
+    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], selection: null, viewLevel: null, hoverRowGroup: null })
     try {
       const raw = await openSource()
       set({ sourceName: raw.name, sourceKind: raw.kind })
@@ -84,6 +93,8 @@ export const useStore = create<State>((set, get) => ({
     const patch: Partial<State> = { selection, selectOrigin: origin }
     if (selection?.kind === 'level') patch.viewLevel = selection.level
     if (selection?.kind === 'column' || selection?.kind === 'page') get().loadChunkPages(selection.rg, selection.col)
+    // Row Group の中のものを選んだら、その Row Group のページの空間範囲も読む（design.md D15）
+    if (selection?.kind === 'rowGroup' || selection?.kind === 'column' || selection?.kind === 'page') get().loadPageBboxes(selection.rg)
     if (selection?.kind === 'rowGroup') {
       const view = get().viewLevel
       const lod = get().inspection?.lod
@@ -110,4 +121,19 @@ export const useStore = create<State>((set, get) => ({
       (e) => done({ status: 'error', error: (e as Error).message }),
     )
   },
+
+  loadPageBboxes(rg) {
+    const { pageCache, inspection, pageBboxes } = get()
+    if (!pageCache || !inspection || pageBboxes[rg]?.status === 'ready' || pageBboxes[rg]?.status === 'loading') return
+    const model = inspection.file.rowGroups[rg]
+    set({ pageBboxes: { ...pageBboxes, [rg]: { status: 'loading' } } })
+    const done = (v: Loadable<PageBboxes>) => {
+      if (get().pageCache === pageCache) set({ pageBboxes: { ...get().pageBboxes, [rg]: v } })
+    }
+    pageCache.loadIndexes(pageBboxIndexWants(model, inspection.geo)).then(
+      () => done({ status: 'ready', data: pageBboxesFromCache(pageCache, model, inspection.geo) }),
+      (e) => done({ status: 'error', error: (e as Error).message }),
+    )
+  },
+  setHoverSpan: (hoverSpan) => set({ hoverSpan }),
 }))

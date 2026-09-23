@@ -4,6 +4,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import { useStore } from '../../state/store'
 import { SELECT_COLOR } from '../../util/color'
 import { LevelControl } from './LevelControl'
+import { spanFeatures } from './pageLayer'
 import { lonLatBboxes, rowGroupFeatures, unionBbox, type RowGroupFeatureProps } from './rowGroupLayer'
 
 // MapLibre v6 は worker の場所を実行時に new URL(変数, import.meta.url) で決めるため、
@@ -26,6 +27,9 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
 }
 
 const SRC = 'row-groups'
+const SPAN_SRC = 'page-spans'
+// Page bbox は bbox covering 列の ColumnIndex から求めるので、covering 列と同じ色で描く
+const SPAN_COLOR = '#0072b2'
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
 export function MapView() {
@@ -37,6 +41,8 @@ export function MapView() {
   const selection = useStore((s) => s.selection)
   const selectOrigin = useStore((s) => s.selectOrigin)
   const hover = useStore((s) => s.hoverRowGroup)
+  const pageBboxes = useStore((s) => s.pageBboxes)
+  const hoverSpan = useStore((s) => s.hoverSpan)
 
   useEffect(() => {
     if (!container.current) return
@@ -49,6 +55,10 @@ export function MapView() {
       map.addLayer({ id: 'rg-line', type: 'line', source: SRC, layout: { 'line-sort-key': ['get', 'level'] }, paint: { 'line-color': ['get', 'color'], 'line-width': 1 } })
       map.addLayer({ id: 'rg-hover', type: 'line', source: SRC, filter: ['==', ['get', 'rg'], -1], paint: { 'line-color': SELECT_COLOR, 'line-width': 2, 'line-dasharray': [2, 1] } })
       map.addLayer({ id: 'rg-selected', type: 'line', source: SRC, filter: ['==', ['get', 'rg'], -1], paint: { 'line-color': SELECT_COLOR, 'line-width': 3 } })
+      map.addSource(SPAN_SRC, { type: 'geojson', data: EMPTY })
+      map.addLayer({ id: 'span-fill', type: 'fill', source: SPAN_SRC, paint: { 'fill-color': SPAN_COLOR, 'fill-opacity': ['case', ['get', 'kept'], 0.12, 0.02] } })
+      map.addLayer({ id: 'span-line', type: 'line', source: SPAN_SRC, paint: { 'line-color': SPAN_COLOR, 'line-width': 1, 'line-opacity': ['case', ['get', 'kept'], 0.9, 0.25] } })
+      map.addLayer({ id: 'span-hover', type: 'line', source: SPAN_SRC, filter: ['==', ['get', 'span'], -1], paint: { 'line-color': SELECT_COLOR, 'line-width': 2.5 } })
       setLoaded(true)
     })
 
@@ -121,6 +131,23 @@ export function MapView() {
       if (b) map.fitBounds([[b[0], Math.max(b[1], -80)], [b[2], Math.min(b[3], 80)]], { padding: 60, maxZoom: 14, duration: 500 })
     }
   }, [selection, selectOrigin, inspection, loaded])
+
+  // 選択中の Row Group のページ単位の bbox（Page Index から求めたもの）
+  const selRg = selection?.kind === 'rowGroup' || selection?.kind === 'column' || selection?.kind === 'page' ? selection.rg : undefined
+  const selSpans = selRg === undefined ? undefined : pageBboxes[selRg]
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !loaded) return
+    const src = map.getSource(SPAN_SRC) as maplibregl.GeoJSONSource
+    const ready = inspection && selRg !== undefined && selSpans?.status === 'ready' && selSpans.data.available ? selSpans.data : undefined
+    src.setData(ready ? spanFeatures(inspection!, [{ rg: selRg!, spans: ready.spans }]) : EMPTY)
+  }, [inspection, selRg, selSpans, loaded])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !loaded) return
+    map.setFilter('span-hover', hoverSpan ? ['all', ['==', ['get', 'rg'], hoverSpan.rg], ['==', ['get', 'span'], hoverSpan.span]] : ['==', ['get', 'span'], -1])
+  }, [hoverSpan, loaded])
 
   const unmappable = inspection && !inspection.geo?.primary?.crs.mapProjection
   const noBbox = inspection && inspection.rowGroupBboxes.every((b) => b.source === 'none')

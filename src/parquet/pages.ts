@@ -45,6 +45,8 @@ export class PageCache {
   private readonly offsetIndexes = new Map<string, OffsetIndexModel>()
   private readonly columnIndexes = new Map<string, ColumnIndexModel>()
   private readonly chunkPages = new Map<string, Promise<ChunkPages>>()
+  /** 読み込み中の Index。同時に来た要求（ページ一覧と Page bbox など）で同じ範囲を二重に読まないため */
+  private readonly inflight = new Map<string, Promise<void>>()
 
   constructor(source: RandomAccessSource, file: FileModel) {
     this.source = source
@@ -69,33 +71,42 @@ export class PageCache {
    */
   async loadIndexes(wants: { chunk: ColumnChunkModel; kind: IndexKind }[]): Promise<{ fetched: number; cached: number }> {
     let cached = 0
-    const todo: { chunk: ColumnChunkModel; kind: IndexKind; req: RangeRequest }[] = []
+    const todo: { id: string; chunk: ColumnChunkModel; kind: IndexKind; req: RangeRequest }[] = []
+    const waits: Promise<void>[] = []
     const seen = new Set<string>()
     for (const w of wants) {
       const range = w.kind === 'offset' ? w.chunk.offsetIndex : w.chunk.columnIndex
       const id = `${w.kind}:${key(w.chunk)}`
       if (!range || seen.has(id)) continue
       seen.add(id)
-      if (this.hasIndex(w.chunk, w.kind)) {
+      const pending = this.inflight.get(id)
+      if (this.hasIndex(w.chunk, w.kind) || pending) {
+        if (pending) waits.push(pending)
         cached++
         continue
       }
-      todo.push({ ...w, req: { range, purpose: `${INDEX_LABEL[w.kind]} RG${w.chunk.rowGroup} ${w.chunk.column.name}` } })
+      todo.push({ ...w, id, req: { range, purpose: `${INDEX_LABEL[w.kind]} RG${w.chunk.rowGroup} ${w.chunk.column.name}` } })
     }
     if (todo.length) {
-      const bufs = await readCoalesced(
+      const job = readCoalesced(
         this.source,
         todo.map((t) => t.req),
+      ).then((bufs) =>
+        todo.forEach((t, i) => {
+          if (t.kind === 'offset') {
+            this.offsetIndexes.set(key(t.chunk), parseOffsetIndex(bufs[i], this.file.rowGroups[t.chunk.rowGroup].numRows))
+          } else {
+            const el = schemaElementOf(this.file.schema, t.chunk)
+            if (el) this.columnIndexes.set(key(t.chunk), parseColumnIndex(bufs[i], el))
+          }
+        }),
       )
-      todo.forEach((t, i) => {
-        if (t.kind === 'offset') {
-          this.offsetIndexes.set(key(t.chunk), parseOffsetIndex(bufs[i], this.file.rowGroups[t.chunk.rowGroup].numRows))
-        } else {
-          const el = schemaElementOf(this.file.schema, t.chunk)
-          if (el) this.columnIndexes.set(key(t.chunk), parseColumnIndex(bufs[i], el))
-        }
-      })
+      const settled = job.finally(() => todo.forEach((t) => this.inflight.delete(t.id)))
+      // 他の要求が待つのは「読み終わったか」だけ。失敗はこの呼び出し元に返し、待つ側は自分で読み直せるようにする
+      todo.forEach((t) => this.inflight.set(t.id, settled.catch(() => undefined)))
+      waits.push(settled)
     }
+    await Promise.all(waits)
     return { fetched: todo.length, cached }
   }
 

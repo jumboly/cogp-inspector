@@ -8,6 +8,7 @@ import { KV, RawJson } from '../common/KV'
 import { columnRole, ROLE_LABEL } from './columnRole'
 import { Help, Overview } from './help'
 import { LevelPrefix } from './LevelPrefix'
+import { PageBboxSection } from './PageBboxView'
 import { ChunkPagesSection, PageView } from './PagesView'
 
 const size = (r: { start: number; end: number }) => r.end - r.start
@@ -296,6 +297,7 @@ function RowGroupView({ ins, rg }: { ins: Inspection; rg: number }) {
       />
       <h4>Column Chunk</h4>
       <ChunkTable ins={ins} chunks={r.columns} onSelect={(ci) => select({ kind: 'column', rg, col: ci }, 'inspector')} />
+      <PageBboxSection ins={ins} rg={rg} />
     </>
   )
 }
