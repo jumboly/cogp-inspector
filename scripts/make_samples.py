@@ -45,8 +45,8 @@ PAGE_ROW_COUNT = 1024
 # cogp（parquet-rs）の書き方に合わせる: ZSTD レベル 3、geometry と bbox は辞書を使わない
 COMPRESSION = "zstd"
 COMPRESSION_LEVEL = 3
-DICTIONARY_COLUMNS = ["id", "tags"]
-DICTIONARY_LEAF_COLUMNS = ["id", "tags.key_value.key", "tags.key_value.value"]
+# pyarrow は入れ子の列を葉のパスで指定しないと辞書を使わない（"tags" だけでは tags.key_value.* に効かない）
+DICTIONARY_COLUMNS = ["id", "tags.key_value.key", "tags.key_value.value"]
 
 HILBERT_ORDER = 16
 
@@ -155,9 +155,7 @@ def write_native_cogp(src: Path, dst: Path) -> None:
         schema,
         compression=COMPRESSION,
         compression_level=COMPRESSION_LEVEL,
-        # pyarrow は入れ子の列を葉のパスで指定しないと辞書を使わない（"tags" だけでは tags.key_value.* に効かない）。
-        # 元の COGP（cogp が書いたもの）は tags の葉も辞書にしているので、そろえる
-        use_dictionary=DICTIONARY_LEAF_COLUMNS,
+        use_dictionary=DICTIONARY_COLUMNS,
         write_statistics=True,
         write_page_index=True,
         max_rows_per_page=PAGE_ROW_COUNT,

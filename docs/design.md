@@ -270,8 +270,8 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
   (1) id 順、(2) Hilbert 順（bbox 中心を 2^16 格子に置いた Hilbert 番号、同じ番号は id 順）を pyarrow で書き、(3) は (1) を cogp v1.0.0（仕様リポジトリのリリースのバイナリ）で変換する。
   cogp-rs 単体のリポジトリ（Kanahiro/cogp-rs）は仕様リポジトリに統合されてアーカイブ済みで、古い `cogp` メタデータ（`gsd`）を書くので使わない。
 - そろえた条件: Row Group 8,192 行・ページ 1,024 行・ZSTD レベル 3・geometry と bbox は辞書なし・Page Index あり。Row Group を公式サンプルの 65,536 行より小さくしたのは、15 万行では通常 GeoParquet が 3 個の Row Group にしかならず、Row Group 単位の読み飛ばしの差が見えないため。
-  そろえられなかった点: pyarrow は ColumnIndex を全列に書く（cogp は bbox 列だけ）。`store_schema=False` で ARROW:schema を省き、Footer の大きさを近づけた（19.3KB / 19.1KB / 28.7KB。COGP は Row Group が多い分大きい）。
-- 生成結果: 元の順 12.2MB・19 RG、Hilbert 順 12.2MB・19 RG、COGP 11.8MB・28 RG・16 Level（z0〜z16 のうち空の Level が 1 つ落ちた）。Level 0 は 1 行だけ（範囲が 0.36° 四方と狭く、最も粗い Level の間引きの格子に 1 点しか入らない）。サイズは 20MB（D43）を下回り、`samples/` に置いて Git で管理する。
+  そろえられなかった点: pyarrow は ColumnIndex を全列に書く（cogp は bbox 列だけ）。`store_schema=False` で ARROW:schema を省き、Footer の大きさを近づけた（19.8KB / 19.6KB / 28.7KB。COGP は Row Group が多い分大きい）。
+- 生成結果: 元の順 11.0MB・19 RG、Hilbert 順 10.8MB・19 RG、COGP 11.8MB・28 RG・16 Level（z0〜z16 のうち空の Level が 1 つ落ちた）。Level 0 は 1 行だけ（範囲が 0.36° 四方と狭く、最も粗い Level の間引きの格子に 1 点しか入らない）。サイズは 20MB（D43）を下回り、`samples/` に置いて Git で管理する。
 - 重なり係数（D42）: 元の順は全体で 18.91（19 個の Row Group がどれもほぼデータ全体を覆う）、Hilbert 順は 1.31、COGP は Level ごとに 0.96〜1.00。lod の無いファイル向けに、診断の目安に「全 Row Group の重なり係数」を足した（COGP では Level どうしが同じ範囲を覆うので出さない）。
 - 比較対象は `compare` として store に持ち、主ファイルとは別の `TracedSource`・`PageCache` で読む。主ファイルの Range 記録・Physical File Map・Expected vs Actual に比較対象の read を混ぜないため。主ファイルを開き直すと比較対象も閉じる（別の地域のファイルと比べても意味が薄いため）。
 - 表示範囲は主ファイルの CRS で渡されるので、比較対象の地図投影が違えば計算せず理由を出す。読む列は番号ではなく名前で対応づける（cogp は bbox 列を作り直すので、並びがファイルごとに違いうる）。
@@ -279,11 +279,14 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
 - 同梱サンプルを開いているときは、比較対象の候補として残りの 2 つのサンプルをボタンで出す（D45）。ヘッダーに「サンプル: 元の順 / Hilbert 順 / COGP」を常に置き、HTTP Range で開く（Vite の public 配信・GitHub Pages とも Range に 206 で応える）。
 - 同梱サンプルでの推定（既定の 5 列、`test/samples.test.ts` で CI でも確かめる）:
 
-  | 表示範囲 | 元の順 | Hilbert 順 | COGP |
-  |---|---|---|---|
-  | 23 区全体（0.0005°/px） | 5.97MB・19 回 | 5.42MB・19 回 | 0.41MB・9 回（Level 8） |
-  | 新宿区くらい（0.00008°/px） | 5.97MB・19 回 | 0.72MB・17 回 | 0.83MB・76 回（Level 11） |
-  | 渋谷駅付近（0.00002°/px） | 5.97MB・19 回 | 0.25MB・15 回 | 0.51MB・60 回（Level 13） |
+  | 表示範囲 | 元の順 | Hilbert 順 | COGP | COGP（2.0、§3.5 D49） |
+  |---|---|---|---|---|
+  | 23 区全体（0.0005°/px） | 5.97MB・19 回 | 5.42MB・19 回 | 0.41MB・9 回（Level 8） | 0.40MB・9 回（Level 8） |
+  | 新宿区くらい（0.00008°/px） | 5.97MB・19 回 | 0.72MB・17 回 | 0.83MB・76 回（Level 11） | 0.81MB・76 回（Level 11） |
+  | 渋谷駅付近（0.00002°/px） | 5.97MB・19 回 | 0.25MB・15 回 | 0.51MB・60 回（Level 13） | 0.49MB・60 回（Level 13） |
+
+  2026-09-23 に元の順・Hilbert 順の tags 列を辞書に直して作り直したが（§3.5 段階 D の実装メモ）、既定の 5 列に tags は入らないので、この表の値は変わらない。
+  COGP（2.0）の値は、新宿区くらいを 139.67〜139.73°E・35.67〜35.72°N として求めた（COGP の値はこの範囲で元の表と一致する）。
 
   元の順は拡大しても何も読み飛ばせない。Hilbert 順は拡大すると Row Group・ページで絞れるが、全体表示では全行を読む。COGP は全体表示で Level による prefix が効き、拡大すると粗い Level から続く prefix の分だけ Hilbert 順より多く読む。§1 の「なぜ空間的にまとめるのか」「なぜ Level があるのか」がこの 3 列で分かれて見える。
 
@@ -366,8 +369,9 @@ D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「お
 - 生成結果: 11.5MB（1.1 版の COGP は 11.8MB）・28 RG・16 Level。診断は 2.0 の 3 項目を含めて MUST をすべて満たす。
   Row Group の bbox（covering の統計を優先）、選ばれる Level、Row Group・ページの絞り込みは、1.1 版の COGP と同じになる（`test/samples.test.ts`）。圧縮後のバイト数は書き手（pyarrow と parquet-rs）の違いで少し変わる。
 - ブラウザで確かめた結果（23 区全体の表示）: Level 8 → 9 回の Range Request で 10,169 行を decode し、描けない行は 0。Expected と Actual はすべて一致した。
-- 見つけた問題: pyarrow は入れ子の列を葉のパスで指定しないと辞書を使わない。`write_geoparquet` の `use_dictionary=["id", "tags"]` は tags の葉に効いておらず、既存の `tokyo-id.parquet`・`tokyo-hilbert.parquet` の tags は PLAIN のまま（COGP は辞書あり）。
-  段階 E の「そろえた条件」の記述と食い違う。2.0 版は葉のパスを指定して COGP にそろえた。既存の 2 つは、作り直すとサンプル・R2・テストの期待値が変わるので、別に扱う。
+- 見つけた問題: pyarrow は入れ子の列を葉のパスで指定しないと辞書を使わない。`write_geoparquet` の `use_dictionary=["id", "tags"]` は tags の葉に効いておらず、`tokyo-id.parquet`・`tokyo-hilbert.parquet` の tags は PLAIN のままだった（COGP は辞書あり）。
+  段階 E の「そろえた条件」の記述と食い違っていた。`DICTIONARY_COLUMNS` を葉のパスにし、cogp v1.0.0 の CLI（リリースの aarch64-apple-darwin 版）で 4 つとも作り直した。
+  元の順は 12.2MB → 11.0MB、Hilbert 順は 12.2MB → 10.8MB になった。COGP と COGP（2.0）はバイト単位で前と同じ（生成に再現性がある）。既定の 5 列に tags は入らないので、推定の読む量は変わらない。
 - 日付変更線をまたぐ bbox（段階 B）は、実ファイルでは確かめられていない。pyarrow は GEOMETRY では平面の bbox を書き、xmin > xmax のファイルを作れないため。
 
 ## 4. アーキテクチャ（MVP で実装済み）
@@ -410,7 +414,7 @@ cogp-inspector/
 │ ├ state/     store.ts（ファイル・選択・trace の共有状態。zustand を想定）
 │ ├ ui/        layout/, tree/, map/, inspector/, bytemap/, help/
 │ └ main.tsx
-├ samples/         比較用サンプル 4 種類（元の順 / Hilbert 順 / COGP / COGP 2.0、各約 12MB。テストでも使う。公開版は R2 から配信）
+├ samples/         比較用サンプル 4 種類（元の順 / Hilbert 順 / COGP / COGP 2.0、各 11MB 前後。テストでも使う。公開版は R2 から配信）
 ├ scripts/         make_samples.py（サンプルの生成）
 ├ data/            大容量サンプル（Git 管理外、ハードリンク）
 ├ docs/            設計メモ・Issue 下書き
