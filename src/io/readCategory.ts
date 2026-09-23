@@ -1,7 +1,7 @@
 import type { ReadRecord } from './source'
 
 /** read の目的の分類。purpose の先頭の語で決まる（purpose は読み込み元が付ける：pages.ts・footer.ts） */
-export type ReadCategory = 'footer' | 'offset-index' | 'column-index' | 'page-header' | 'data-page' | 'other'
+export type ReadCategory = 'footer' | 'offset-index' | 'column-index' | 'page-header' | 'data-page' | 'page-content' | 'other'
 
 export function readCategory(purpose: string): ReadCategory {
   if (purpose.startsWith('trailer') || purpose.startsWith('footer')) return 'footer'
@@ -9,6 +9,8 @@ export function readCategory(purpose: string): ReadCategory {
   if (purpose.startsWith('ColumnIndex')) return 'column-index'
   if (purpose.startsWith('page-header')) return 'page-header'
   if (purpose.startsWith('data ')) return 'data-page'
+  // 辞書の値と index を見るための read（data/pageContent.ts）。地図に描くための read とは分けて数える
+  if (purpose.startsWith('page-content')) return 'page-content'
   return 'other'
 }
 
@@ -18,6 +20,7 @@ export const CATEGORY_LABEL: Record<ReadCategory, string> = {
   'column-index': 'ColumnIndex',
   'page-header': 'ページヘッダ',
   'data-page': 'データページ',
+  'page-content': 'ページの中身（辞書と index）',
   other: 'その他',
 }
 

@@ -17,6 +17,9 @@ export interface PageHeaderModel {
   numNulls?: number
   numRows?: number
   isCompressed?: boolean
+  /** DATA_PAGE_V2 のみ。v2 の level は圧縮されず、長さの前置きも無くページ本体の先頭に置かれるので、長さをヘッダから知る */
+  defLevelsByteLength?: number
+  repLevelsByteLength?: number
   /** DICTIONARY_PAGE のみ */
   isSorted?: boolean
   /** ページ単位の Statistics があるか（v1/v2 のデータページヘッダに任意で入る） */
@@ -54,6 +57,8 @@ export function parsePageHeader(buf: ArrayBuffer): PageHeaderModel {
       encoding: encodingName(v2.field_4),
       // is_compressed は省略時 true（parquet.thrift の既定値）
       isCompressed: (v2.field_7 as boolean | undefined) ?? true,
+      defLevelsByteLength: v2.field_5 as number,
+      repLevelsByteLength: v2.field_6 as number,
       hasStatistics: v2.field_8 !== undefined,
     }
   }
