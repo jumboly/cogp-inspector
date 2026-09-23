@@ -66,7 +66,8 @@ export interface AccessPlan {
     file: StageTotals
     prefix: StageTotals
     rowGroupPruned: StageTotals & { pruned: number; unknown: number }
-    pageIndex: { fetched: number; cached: number; bytes: number; rowGroupsWithPageBbox: number; skipped: boolean }
+    /** requests は新たに読むと決めた Index を合体した範囲（キャッシュ済みの分は含まない）。Expected vs Actual の Page Index 側 */
+    pageIndex: { fetched: number; cached: number; bytes: number; rowGroupsWithPageBbox: number; skipped: boolean; requests: ByteRange[] }
     pages: StageTotals & { spans: number; spansKept: number }
     requests: { logical: number; coalesced: number; bytes: number; logicalAll: number; coalescedAll: number }
   }
@@ -154,7 +155,7 @@ export async function planAccess(ins: Inspection, cache: PageCache, input: PlanI
   //    （全列を読んだ場合との比較 D21 のため。parquet-rs では 1 Row Group 分が隣接し 1 回の read になる）
   const skipped = kept.length > MAX_PAGE_INDEX_ROW_GROUPS
   const wants: { chunk: ColumnChunkModel; kind: IndexKind }[] = skipped ? [] : kept.flatMap((r) => [...pageBboxIndexWants(r, geo), ...r.columns.map((chunk) => ({ chunk, kind: 'offset' as const }))])
-  const loaded = await cache.loadIndexes(wants)
+  const { fetchedRanges, ...loaded } = await cache.loadIndexes(wants)
   const indexBytes = [...new Map(wants.map((w) => [`${w.kind}:${w.chunk.rowGroup}:${w.chunk.column.index}`, w.kind === 'offset' ? w.chunk.offsetIndex : w.chunk.columnIndex])).values()].reduce((a, r) => a + (r ? r.end - r.start : 0), 0)
 
   // 5. select pages: Page bbox が表示範囲と重なる行範囲だけを読む
@@ -197,7 +198,7 @@ export async function planAccess(ins: Inspection, cache: PageCache, input: PlanI
       file: totals(file.rowGroups, cols),
       prefix: totals(prefix, cols),
       rowGroupPruned: { ...totals(kept, cols), pruned: decisions.filter((d) => d === 'prune').length, unknown: decisions.filter((d) => d === 'unknown').length },
-      pageIndex: { ...loaded, bytes: indexBytes, rowGroupsWithPageBbox: withPageBbox, skipped },
+      pageIndex: { ...loaded, bytes: indexBytes, rowGroupsWithPageBbox: withPageBbox, skipped, requests: coalesce(fetchedRanges, (r) => r).map((run) => run.range) },
       pages: { rowGroups: plans.filter((p) => p.keptRows.length).length, rows: pageRows, bytes: rangeBytes(selected), bytesAll: rangeBytes(all), spans, spansKept },
       requests: { logical: selected.length, coalesced: requests.length, bytes: rangeBytes(requests), logicalAll: all.length, coalescedAll: coalesce(all, (r) => r).length },
     },

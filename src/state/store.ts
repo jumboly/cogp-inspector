@@ -50,6 +50,12 @@ export interface SimulatorState {
   focus: PlanStage
   /** 最後に計算した表示範囲と縮尺。列を変えたときに同じ範囲で計算し直すため */
   lastView?: Omit<PlanInput, 'columns'>
+  /**
+   * plan の計算を始めた時刻と、最後に計算を始めた時刻（performance.now()）。
+   * この間に始まった read を「その計画の Actual」とみなす（design.md D39）。計算中の新しい計画の read を古い計画に混ぜないため
+   */
+  planStartedAt?: number
+  runStartedAt?: number
 }
 
 const SIM_OFF: SimulatorState = { enabled: false, columns: [], status: 'idle', focus: 'requests' }
@@ -243,7 +249,8 @@ export const useStore = create<State>((set, get) => ({
     const token = ++simToken
     // 計画が変わるので、前の計画の実データの読み込みは止める（描いた結果は次の結果が出るまで残す）
     abortData()
-    set({ simulator: { ...simulator, status: 'running', lastView: view } })
+    const startedAt = performance.now()
+    set({ simulator: { ...simulator, status: 'running', lastView: view, runStartedAt: startedAt } })
     // 中断した計画の進み具合（n / m Range）を、新しい計画の計算中に出し続けないよう消す
     const { data } = get()
     if (data.status === 'reading') set({ data: { ...data, result: undefined } })
@@ -251,7 +258,7 @@ export const useStore = create<State>((set, get) => ({
       (plan) => {
         if (token !== simToken || !get().simulator.enabled) return
         // Simulator の間は、選ばれた Level の prefix を地図に表示する（手動の Level 選択は無効：design.md D19）
-        set({ simulator: { ...get().simulator, status: 'ready', plan, error: undefined }, viewLevel: plan.level.used ? (plan.level.level?.level ?? null) : null })
+        set({ simulator: { ...get().simulator, status: 'ready', plan, planStartedAt: startedAt, error: undefined }, viewLevel: plan.level.used ? (plan.level.level?.level ?? null) : null })
         if (get().data.enabled) readData(plan)
       },
       (e) => {
@@ -323,6 +330,8 @@ function readData(plan: AccessPlan) {
         // 中断は新しい計画に置き換わっただけなので、エラーとして見せない
         if (ac.signal.aborted) return
         setData({ status: 'error', error: (e as Error).message })
+        // 1 つ失敗しても他の read は続いてしまう。結果はもう使わないので、残りを止めて通信を減らす
+        ac.abort()
       },
     )
 }

@@ -68,9 +68,10 @@ export class PageCache {
 
   /**
    * 指定した Index をまとめて読む。読み済み・ファイルに無いものは飛ばし、残りは隣接する範囲を合体して読む。
-   * 戻り値は「新たに読んだ数」と「キャッシュにあった数」（Access Plan に表示するため）。
+   * 戻り値は「新たに読んだ数」と「キャッシュにあった数」（Access Plan に表示するため）と、新たに読むと決めた範囲（合体前）。
+   * 範囲は Expected vs Actual で、実際の read と突き合わせるのに使う（design.md D40）。
    */
-  async loadIndexes(wants: { chunk: ColumnChunkModel; kind: IndexKind }[]): Promise<{ fetched: number; cached: number }> {
+  async loadIndexes(wants: { chunk: ColumnChunkModel; kind: IndexKind }[]): Promise<{ fetched: number; cached: number; fetchedRanges: ByteRange[] }> {
     let cached = 0
     const todo: { id: string; chunk: ColumnChunkModel; kind: IndexKind; req: RangeRequest }[] = []
     const waits: Promise<void>[] = []
@@ -108,7 +109,7 @@ export class PageCache {
       waits.push(settled)
     }
     await Promise.all(waits)
-    return { fetched: todo.length, cached }
+    return { fetched: todo.length, cached, fetchedRanges: todo.map((t) => t.req.range) }
   }
 
   /** Column Chunk のページ一覧をヘッダ込みで作る（Column Chunk を選んだときに呼ぶ：design.md D16） */

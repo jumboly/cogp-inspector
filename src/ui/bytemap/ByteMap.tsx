@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Inspection } from '../../inspect'
 import type { ByteRange } from '../../parquet/model'
 import type { AccessPlan } from '../../plan/accessPlan'
+import { usePlanComparison } from '../../state/planComparison'
 import { useStore, type PlanStage } from '../../state/store'
-import { PLAN_COLOR, READ_COLOR, SELECT_COLOR } from '../../util/color'
+import { MATCH_COLOR, PLAN_COLOR, READ_COLOR, SELECT_COLOR, UNPLANNED_COLOR } from '../../util/color'
 import { formatBytes, formatNumber } from '../../util/format'
 import { buildSegments, DICT_COLOR, pageSegments, ROLE_COLOR, selectionRange, type Segment } from './segments'
 
@@ -13,6 +14,8 @@ const LANES = [
   { key: 'chunk', label: 'Column Chunk', h: 14 },
   { key: 'page', label: 'Page', h: 14 },
   { key: 'plan', label: '読む予定', h: 14 },
+  // 「読む予定」の真下に並べ、推定と実測を上下で見比べられるようにする（design.md D40）
+  { key: 'actual', label: '実際に読んだ', h: 14 },
   { key: 'reads', label: '読み込み', h: 14 },
 ] as const
 const LABEL_W = 92
@@ -83,6 +86,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
   const chunkPages = useStore((s) => s.chunkPages)
   const sim = useStore((s) => s.simulator)
   const planned = useMemo(() => plannedRanges(ins, sim.enabled ? sim.plan : undefined, sim.focus), [ins, sim.enabled, sim.plan, sim.focus])
+  const cmp = usePlanComparison()
   const canvas = useRef<HTMLCanvasElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(800)
@@ -160,6 +164,28 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
             g.fillRect(x, y, w, lane.h)
           }
         }
+      } else if (lane.key === 'actual') {
+        if (!cmp) {
+          g.fillStyle = muted
+          g.fillText('Access Simulator を ON にすると、計画ごとに実際の read を「読む予定」と照合します', LABEL_W + 6, y + lane.h / 2)
+        } else {
+          for (const c of cmp.reads) {
+            const r = { start: c.read.offset, end: c.read.offset + c.read.length }
+            if (r.end < view.start || r.start > view.end) continue
+            const { x, w } = rect(r)
+            g.fillStyle = c.match === 'planned' ? MATCH_COLOR : c.match === 'unplanned' ? UNPLANNED_COLOR : muted
+            g.fillRect(x, y, w, lane.h)
+          }
+          // 未読は「読んでいない」ので塗らずに破線の枠だけにする
+          g.strokeStyle = muted
+          g.setLineDash([2, 2])
+          for (const u of cmp.unread) {
+            if (u.range.end < view.start || u.range.start > view.end) continue
+            const { x, w } = rect(u.range)
+            g.strokeRect(x + 0.5, y + 0.5, w - 1, lane.h - 1)
+          }
+          g.setLineDash([])
+        }
       } else if (lane.key === 'page' && !segments.some((s) => s.lane === 'page')) {
         g.fillStyle = muted
         g.fillText('Column Chunk を選ぶと、その Chunk のページを読んで表示します', LABEL_W + 6, y + lane.h / 2)
@@ -202,7 +228,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
     if (hoverRg !== null) outline(ins.file.rowGroups[hoverRg].range, SELECT_COLOR, [3, 2])
     if (selRange) outline(selRange, SELECT_COLOR, [])
     g.fillStyle = text
-  }, [width, view, segments, reads, selRange, hoverRg, ins, plotW, planned])
+  }, [width, view, segments, reads, selRange, hoverRg, ins, plotW, planned, cmp])
 
   const hitTest = (x: number, y: number) => {
     const laneIdx = LANES.findIndex((_, i) => y >= laneTop(i) && y < laneTop(i) + LANES[i].h)
@@ -214,6 +240,19 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
         return x >= rx && x <= rx + w
       })
       return r ? { label: `読む予定（${planned!.label}）`, range: r, sel: { kind: 'plan' } as const } : null
+    }
+    if (lane === 'actual') {
+      const hit = (r: ByteRange) => {
+        const { x: rx, w } = rect(r)
+        return x >= rx && x <= rx + w
+      }
+      const c = [...(cmp?.reads ?? [])].reverse().find((c) => hit({ start: c.read.offset, end: c.read.offset + c.read.length }))
+      if (c) {
+        const label = c.match === 'planned' ? '予定どおり' : c.match === 'unplanned' ? '予定外' : c.read.aborted ? '中断' : '失敗'
+        return { label: `実際に読んだ（${label}）#${c.read.id}: ${c.read.purpose}`, range: { start: c.read.offset, end: c.read.offset + c.read.length }, sel: { kind: 'reads', id: c.read.id } as const }
+      }
+      const u = cmp?.unread.find((u) => hit(u.range))
+      return u ? { label: '未読（読む予定だったが読んでいない）', range: u.range, sel: { kind: 'plan' } as const } : null
     }
     if (lane === 'reads') {
       const r = [...reads].reverse().find((r) => {
@@ -273,7 +312,7 @@ function ByteMapCanvas({ ins }: { ins: Inspection }) {
         </button>
         <button onClick={() => zoomTo({ start: ins.file.pageIndex?.start ?? ins.file.footer.start, end: ins.file.size }, 0.05)}>末尾（Footer 周辺）へ</button>
         <span className="legend">
-          <i style={{ background: ROLE_COLOR.geometry }} /> geometry <i style={{ background: ROLE_COLOR.covering }} /> bbox covering <i style={{ background: ROLE_COLOR.attribute }} /> 属性 <i style={{ background: DICT_COLOR }} /> 辞書ページ <i style={{ background: PLAN_COLOR }} /> 読む予定 <i style={{ background: READ_COLOR }} /> 読んだ範囲
+          <i style={{ background: ROLE_COLOR.geometry }} /> geometry <i style={{ background: ROLE_COLOR.covering }} /> bbox covering <i style={{ background: ROLE_COLOR.attribute }} /> 属性 <i style={{ background: DICT_COLOR }} /> 辞書ページ <i style={{ background: PLAN_COLOR }} /> 読む予定・予定どおり <i style={{ background: UNPLANNED_COLOR }} /> 予定外 <i style={{ background: READ_COLOR }} /> 読んだ範囲
         </span>
         <span className="muted bytemap-info">
           {hover

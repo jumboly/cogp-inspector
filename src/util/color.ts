@@ -24,3 +24,9 @@ export const READ_COLOR = '#ff5a36'
 export const SELECT_COLOR = '#ff2d95'
 /** Access Simulator が推定した「読む予定」の範囲（実際に読んだ範囲の色と区別する） */
 export const PLAN_COLOR = '#009e73'
+/**
+ * Expected vs Actual の照合（design.md D40）。予定どおりは「読む予定」と同じ緑にして上の段と対応が見えるようにし、
+ * 予定外は読んだ範囲の赤・選択の桃色・geometry 列の橙・辞書ページの紫のどれとも区別できる黄色にする
+ */
+export const MATCH_COLOR = PLAN_COLOR
+export const UNPLANNED_COLOR = '#f0e442'

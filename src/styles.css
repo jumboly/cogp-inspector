@@ -582,7 +582,8 @@ a {
   padding-top: 0;
 }
 /* 再計算中は古い結果だと分かるよう薄くする */
-.funnel.stale {
+.funnel.stale,
+.compare.stale {
   opacity: 0.5;
 }
 .funnel-bar {
@@ -672,4 +673,25 @@ a {
 .data-toggle {
   display: block;
   margin: 4px 0 8px;
+}
+/* Expected vs Actual の照合（design.md D40）。Physical File Map の「実際に読んだ」の段と同じ色 */
+.match-planned {
+  color: #009e73;
+}
+.match-unplanned {
+  /* 地の上で読めるよう、Physical File Map の黄色（#f0e442）を暗くした色 */
+  color: #8a7c00;
+  font-weight: 600;
+}
+.match-unread {
+  color: var(--muted);
+}
+.compare th,
+.compare td,
+.compare-list td:last-child {
+  /* Inspector の幅に収まるよう折り返す（既定の .table は折り返さない） */
+  white-space: normal;
+}
+.compare td:not(:first-child) {
+  text-align: right;
 }

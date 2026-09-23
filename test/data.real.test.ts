@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs'
 import { compressors } from 'hyparquet-compressors'
 import { describe, expect, it } from 'vitest'
-import { dataBlocker, readPlanData, type DataReadResult, type DecodedFeature } from '../src/data/readData'
+import { dataBlocker, geometryColumn, readPlanData, type DataReadResult, type DecodedFeature } from '../src/data/readData'
 import { inspect } from '../src/inspect'
 import type { ReadRecord } from '../src/io/source'
 import { TracedSource } from '../src/io/traced'
 import { PageCache } from '../src/parquet/pages'
 import { defaultColumns, planAccess } from '../src/plan/accessPlan'
+import { comparePlan, expectedDecodedRows } from '../src/plan/compare'
 import { nodeFileSource } from './nodeSource'
 
 const SAMPLE = new URL('../data/pois.cogp.parquet', import.meta.url).pathname
@@ -55,6 +56,28 @@ describe.skipIf(!existsSync(SAMPLE))('公式サンプルの実データ読み込
     // 全列 × 全体表示（最も粗い Level ではなく、細かい縮尺で世界全体）は上限を超える
     const all = await planAccess(ins, cache, { viewport: [[-180, -85, 180, 85]], targetResolution: 0.00001, columns: ins.file.leafColumns.map((c) => c.index) })
     expect(dataBlocker(ins, all)).toBe('over-limit')
+  })
+
+  it('Page Index とデータページの read が Expected の Range とすべて一致する（design.md D40）', async () => {
+    const reads: ReadRecord[] = []
+    const src = new TracedSource(nodeFileSource(SAMPLE), (r) => reads.push(r))
+    const ins = await inspect(src)
+    const cache = new PageCache(src, ins.file)
+    reads.length = 0
+    const plan = await planAccess(ins, cache, { ...TOKYO, columns: defaultColumns(ins) })
+    const res = await readPlanData(ins, src, plan, { compressors })
+    const cmp = comparePlan(plan, reads, { data: true })
+    expect(cmp.reads.length).toBe(reads.length)
+    expect(cmp.reads.every((c) => c.match === 'planned')).toBe(true)
+    expect(cmp.unread).toEqual([])
+    expect(cmp.actual.index).toMatchObject(cmp.expected.index)
+    expect(cmp.actual.data).toMatchObject(cmp.expected.data)
+    expect(cmp.expected.index.requests).toBeGreaterThan(0)
+    expect(res.readRows).toBe(expectedDecodedRows(plan, geometryColumn(ins)!.index))
+
+    // 同じ範囲をもう一度計画すると、Index はキャッシュから使うので Page Index の Expected は 0
+    const again = await planAccess(ins, cache, { ...TOKYO, columns: defaultColumns(ins) })
+    expect(again.stages.pageIndex.requests).toEqual([])
   })
 
   it('Range を読み終えるたびに進み具合を返し、粗い Level の行から先に出る', async () => {
