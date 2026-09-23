@@ -113,6 +113,11 @@ function dictionariesOf(cache: PageCache): Map<string, DictionaryContent> {
   return m
 }
 
+/** Column Chunk の辞書ページを読み済みか（読む前にボタンに出すバイト数を決めるため） */
+export function hasDictionary(cache: PageCache, rg: number, col: number): boolean {
+  return dictionariesOf(cache).has(`${rg}:${col}`)
+}
+
 interface Decoder {
   schemaPath: ReturnType<typeof getSchemaPath>
   element: SchemaElement

@@ -5,6 +5,7 @@ import type { ChunkPages, PageModel } from '../../parquet/pages'
 import { chunkKey, useStore } from '../../state/store'
 import { formatBytes, formatNumber, formatPercent, formatRange, formatValue } from '../../util/format'
 import { KV } from '../common/KV'
+import { PageContentSection } from './PageContentView'
 
 const size = (r: { start: number; end: number }) => r.end - r.start
 
@@ -41,7 +42,7 @@ export function ChunkPagesSection({ ins, chunk }: { ins: Inspection; chunk: Colu
           ['ページ数', `${formatNumber(data.length)}${dictionary ? ' + 辞書ページ 1' : ''}`],
           ['位置の求め方', locatedBy === 'offset-index' ? 'OffsetIndex' : 'ヘッダを順にたどる', LOCATED_BY[locatedBy]],
           ['ページヘッダの合計', `${formatBytes(headerBytes)}（Column Chunk の ${formatPercent(headerBytes, chunk.compressedSize)}）`],
-          ['データページの符号化', encodings.join(', ') || '-', encodings.includes('RLE_DICTIONARY') || encodings.includes('PLAIN_DICTIONARY') ? '辞書の番号（index）を並べている' : undefined],
+          ['データページの符号化', encodings.join(', ') || '-', encodingNote(encodings)],
           ['ColumnIndex', ci ? `あり（boundary_order ${ci.boundaryOrder}）` : 'なし', ci ? 'ページごとの最小・最大。ページ単位の読み飛ばしに使える' : 'ページ単位の読み飛ばしには使えない列'],
         ]}
       />
@@ -78,6 +79,14 @@ export function ChunkPagesSection({ ins, chunk }: { ins: Inspection; chunk: Colu
       {ins.file.rowGroups[chunk.rowGroup].numRows !== chunk.numValues && <p className="muted">値の数と行数が違うのは、繰り返し（リスト）列で 1 行に複数の値があるためです。</p>}
     </>
   )
+}
+
+function encodingNote(encodings: (string | undefined)[]): string | undefined {
+  const dict = encodings.filter((e) => e === 'RLE_DICTIONARY' || e === 'PLAIN_DICTIONARY').length
+  if (!dict) return undefined
+  // 辞書が大きくなりすぎると writer は途中のページから辞書をやめる（design.md D58）
+  if (dict < encodings.length) return '辞書の番号（index）を並べたページと、途中から辞書をやめて値をそのまま並べたページ（fallback）が混ざっている'
+  return '辞書の番号（index）を並べている。ページを選んで「中身を読む」と、index と辞書の値の対応が見られる'
 }
 
 function DictionarySummary({ page, chunk }: { page: PageModel; chunk: ColumnChunkModel }) {
@@ -133,6 +142,7 @@ function PageDetail({ chunk, pages, p, ci }: { chunk: ColumnChunkModel; pages: C
           ['CRC', h?.crc !== undefined ? String(h.crc) : 'なし'],
         ]}
       />
+      <PageContentSection rg={chunk.rowGroup} col={chunk.column.index} pages={pages} p={p} />
     </>
   )
 }

@@ -760,3 +760,84 @@ a {
   gap: 8px;
   align-items: center;
 }
+.cat-page-content {
+  /* 辞書ページの紫（Physical File Map・辞書の枠）とそろえる */
+  background: #8e6c8a;
+}
+/* ---- ページの中身（辞書の値と index：design.md D53〜D59） ---- */
+.content-load {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+/* ページ本体の帯。区間の色は level（青系）・index（紫系）・前置き（灰）で分ける */
+.body-strip {
+  position: relative;
+  height: 22px;
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.body-sec {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 1px;
+  overflow: hidden;
+}
+.body-sec-length,
+.body-sec-bit-width {
+  background: #9a9aa6;
+}
+.body-sec-rep {
+  background: #56b4e9;
+}
+.body-sec-def {
+  background: #0072b2;
+}
+.body-sec-index {
+  background: #8e6c8a;
+}
+/* RLE は区間の色を濃く、Bit-Packing は薄く重ねる。区切りの境目は白い線で見せる */
+.body-run {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 1px;
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+.body-run-rle {
+  background: rgba(0, 0, 0, 0.35);
+}
+.body-run-bit-packed {
+  background: rgba(255, 255, 255, 0.35);
+}
+.body-run.active {
+  background: #ff2d95;
+}
+.legend-box {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  vertical-align: -1px;
+}
+.table tr.active td {
+  background: var(--active);
+}
+.table tr.row-start td {
+  border-top: 2px solid var(--border);
+}
+.value-cell {
+  max-width: 220px;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+  font-size: 12px;
+}

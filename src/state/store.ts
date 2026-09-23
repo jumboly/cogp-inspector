@@ -2,6 +2,7 @@ import type { Compressors } from 'hyparquet'
 import { create } from 'zustand'
 import { levelOfRowGroup } from '../cogp/lod'
 import { dataBlocker, readPlanData, type DataBlocker, type DataReadResult, type DecodedFeature } from '../data/readData'
+import { readPageContent, type PageContent } from '../data/pageContent'
 import { SourceError } from '../io/errors'
 import type { RandomAccessSource, ReadRecord } from '../io/source'
 import { TracedSource } from '../io/traced'
@@ -105,11 +106,12 @@ export interface CompareState {
 const NO_TOTALS = { main: ZERO_COST, target: ZERO_COST }
 const COMPARE_OFF: CompareState = { status: 'idle', reads: [], planStatus: 'idle', missingColumns: [], totals: NO_TOTALS }
 
-// 展開ライブラリは「実データを読む」を初めて ON にしたときに読み込む（初期表示のバンドルを増やさない：D34）
+// 展開ライブラリは「実データを読む」を初めて ON にしたとき（またはページの中身を初めて読むとき）に読み込む（初期表示のバンドルを増やさない：D34）
 let compressorsPromise: Promise<Compressors> | undefined
 const loadCompressors = () => (compressorsPromise ??= import('hyparquet-compressors').then((m) => m.compressors))
 
 export const chunkKey = (rg: number, col: number) => `${rg}:${col}`
+export const pageKey = (rg: number, col: number, page: number) => `${rg}:${col}:${page}`
 
 interface State {
   status: 'idle' | 'loading' | 'ready' | 'error'
@@ -121,6 +123,8 @@ interface State {
   pageCache?: PageCache
   /** Column Chunk ごとのページ一覧（キーは chunkKey）。選んだ Column Chunk の分だけ読む */
   chunkPages: Record<string, Loadable<ChunkPages>>
+  /** ページの中身（辞書の値と index。キーは pageKey）。Inspector のボタンを押したページの分だけ読む（design.md D53） */
+  pageContents: Record<string, Loadable<PageContent>>
   /** Row Group ごとの Page bbox（キーは Row Group 番号）。選んだ Row Group の分だけ読む */
   pageBboxes: Record<number, Loadable<PageBboxes>>
   /** Inspector の Page bbox 一覧でホバー中の行範囲（地図で強調する） */
@@ -140,6 +144,7 @@ interface State {
   setHoverRowGroup: (rg: number | null) => void
   loadChunkPages: (rg: number, col: number) => void
   loadPageBboxes: (rg: number) => void
+  loadPageContent: (rg: number, col: number, page: number) => void
   setHoverSpan: (h: { rg: number; span: number } | null) => void
   setSimulatorEnabled: (enabled: boolean) => void
   setSimulatorColumns: (columns: number[]) => void
@@ -164,6 +169,7 @@ export const useStore = create<State>((set, get) => ({
   status: 'idle',
   reads: [],
   chunkPages: {},
+  pageContents: {},
   pageBboxes: {},
   hoverSpan: null,
   simulator: SIM_OFF,
@@ -175,7 +181,7 @@ export const useStore = create<State>((set, get) => ({
 
   async open(openSource) {
     abortData()
-    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageBboxes: {}, hoverSpan: null, reads: [], simulator: SIM_OFF, data: DATA_OFF, compare: COMPARE_OFF, selection: null, viewLevel: null, hoverRowGroup: null })
+    set({ status: 'loading', error: undefined, inspection: undefined, pageCache: undefined, chunkPages: {}, pageContents: {}, pageBboxes: {}, hoverSpan: null, reads: [], simulator: SIM_OFF, data: DATA_OFF, compare: COMPARE_OFF, selection: null, viewLevel: null, hoverRowGroup: null })
     try {
       const raw = await openSource()
       set({ sourceName: raw.name, sourceKind: raw.kind })
@@ -224,6 +230,23 @@ export const useStore = create<State>((set, get) => ({
       (data) => done({ status: 'ready', data }),
       (e) => done({ status: 'error', error: (e as Error).message }),
     )
+  },
+
+  loadPageContent(rg, col, page) {
+    const { pageCache, inspection, pageContents } = get()
+    const k = pageKey(rg, col, page)
+    if (!pageCache || !inspection || pageContents[k]?.status === 'ready' || pageContents[k]?.status === 'loading') return
+    const chunk = inspection.file.rowGroups[rg].columns[col]
+    set({ pageContents: { ...pageContents, [k]: { status: 'loading' } } })
+    const done = (v: Loadable<PageContent>) => {
+      if (get().pageCache === pageCache) set({ pageContents: { ...get().pageContents, [k]: v } })
+    }
+    loadCompressors()
+      .then((compressors) => readPageContent(pageCache, inspection.file.schema, chunk, page, compressors))
+      .then(
+        (data) => done({ status: 'ready', data }),
+        (e) => done({ status: 'error', error: (e as Error).message }),
+      )
   },
 
   loadPageBboxes(rg) {
