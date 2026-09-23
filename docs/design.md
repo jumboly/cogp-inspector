@@ -296,6 +296,10 @@ D30〜D32 はユーザーと 1 問ずつ議論して決定。D33 以降は「以
   URL はビルド時の `VITE_SAMPLES_BASE`（GitHub のリポジトリ変数 `SAMPLES_BASE`）で渡し、未設定ならサンプルのボタンを出さない。開発サーバーは `samples/` を `data/` と同じく Range 付きで配信する。
 - `HttpRangeSource` は、応答に Content-Encoding が付いている、または Range 応答の全体の長さが HEAD のサイズと違うときに `compressed-transfer` として止め、理由を出す。
   どちらのヘッダもクロスオリジンでは公開されていないと読めないので、読めたときだけ確かめる。
+- R2 は r2.dev の公開 URL（`https://pub-a52f5fe309804275a28edf944a959183.r2.dev/`）から直接配信する。r2.dev でもバケットの CORS ポリシーが効くことを確かめた
+  （許可オリジン `https://www.jumboly.jp` と `http://localhost:5173`、GET / HEAD、許可ヘッダ `range`、公開ヘッダ content-length・content-range など。プリフライトは 204）。
+  gzip は掛からず、HEAD の Content-Length は元のサイズと一致し、Range は 206 を返す。3 ファイルとも SHA-1 が手元と一致した。
+  r2.dev は公式に「開発向け・レート制限あり」とされるが、1 セッション数十回の Range なら足りる見込み【推測】。足りなければカスタムドメインに移す。
 
 ## 4. アーキテクチャ（MVP で実装済み）
 
