@@ -16,8 +16,8 @@ async function open(file: string): Promise<{ ins: Inspection; cache: PageCache }
 }
 
 const openAll = async () => {
-  const [id, hilbert, cogp] = await Promise.all(SAMPLES.map((s) => open(s.file)))
-  return { id, hilbert, cogp }
+  const [id, hilbert, cogp, cogpV2] = await Promise.all(SAMPLES.map((s) => open(s.file)))
+  return { id, hilbert, cogp, cogpV2 }
 }
 
 const plan = (f: { ins: Inspection; cache: PageCache }, view: Omit<PlanInput, 'columns'>) => planAccess(f.ins, f.cache, { ...view, columns: defaultColumns(f.ins) })
@@ -88,9 +88,31 @@ describe('同梱の比較用サンプル', () => {
     expect(planCost(await plan(cogp, OVERVIEW)).indexRequests).toBe(0)
   })
 
+  it('COGP（2.0）は GEOMETRY 論理型を使い、Level・Row Group・読む範囲の絞り込みは COGP と同じ（D49）', async () => {
+    const { cogp, cogpV2 } = await openAll()
+    const g = cogpV2.ins.geo!
+    expect(g).toMatchObject({ hasGeo: true, version: '2.0.0', primary: { logical: { type: 'GEOMETRY' }, crs: { id: 'OGC:CRS84' } } })
+    expect(cogpV2.ins.lod?.valid).toBe(true)
+    // 圧縮後のバイト数は書き手（pyarrow と parquet-rs）で違うので、lod に書かれた値だけを比べる
+    const lodOf = (f: typeof cogp) => f.ins.lod!.levels.map((l) => [l.resolution, l.rowGroupEnd])
+    expect(lodOf(cogpV2)).toEqual(lodOf(cogp))
+    expect(cogpV2.ins.file.rowGroups.map((r) => r.numRows)).toEqual(cogp.ins.file.rowGroups.map((r) => r.numRows))
+    const v = Object.fromEntries(diagnose(cogpV2.ins, () => undefined).map((d) => [d.id, d.verdict]))
+    expect(v).toMatchObject({ geoparquet: 'ok', 'geo2-crs': 'ok', 'geo2-types': 'ok', 'geo2-native': 'ok' })
+    // Row Group の bbox は covering 列の統計を優先する（geospatial_statistics と同じ範囲になる）
+    expect(cogpV2.ins.rowGroupBboxes.map((b) => b.bbox)).toEqual(cogp.ins.rowGroupBboxes.map((b) => b.bbox))
+    for (const view of [OVERVIEW, SHIBUYA]) {
+      const [a, b] = await Promise.all([plan(cogp, view), plan(cogpV2, view)])
+      expect(b.level.level?.level).toBe(a.level.level?.level)
+      expect(b.stages.rowGroupPruned.rowGroups).toBe(a.stages.rowGroupPruned.rowGroups)
+      expect(b.stages.pages.rows).toBe(a.stages.pages.rows)
+    }
+  })
+
   it('URL・ファイル名から同梱サンプルを見分ける', () => {
     expect(sampleOf('https://www.jumboly.jp/cogp-inspector/samples/tokyo.cogp.parquet')?.id).toBe('cogp')
     expect(sampleOf('tokyo-id.parquet')?.id).toBe('id')
+    expect(sampleOf('/samples/tokyo.cogp-v2.parquet')?.id).toBe('cogp-v2')
     expect(sampleOf('pois.cogp.parquet')).toBeUndefined()
   })
 })

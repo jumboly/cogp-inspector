@@ -53,6 +53,7 @@ Page・Page Index を必要な分だけ読んで表示し、Access Simulator で
 - [x] MVP 実装（ファイル読み込み、構造表示、Row Group bbox の地図表示、Physical File Map）
 - [x] Phase 2（Page / Page Index / Access Simulator / Range Request 可視化）
 - [x] Phase 3（実データ描画、Expected vs Actual、診断、比較用サンプルと通常 GeoParquet との比較）
+- [x] GeoParquet 2.0（Parquet ネイティブの GEOMETRY / GEOGRAPHY 型、論理型の crs、日付変更線をまたぐ bbox、2.0 の MUST の診断）
 
 未対応の課題は [docs/issues/](docs/issues/) に下書きし、GitHub Issue として管理します。
 
@@ -86,7 +87,7 @@ npm run build   # 静的ファイルを dist/ に出力（main への push で G
 
 ### サンプルデータ
 
-ヘッダーの「サンプル」から、同梱の比較用サンプル 3 種類を開けます（`samples/`、各約 12MB）。
+ヘッダーの「サンプル」から、同梱の比較用サンプル 4 種類を開けます（`samples/`、各約 12MB）。
 COGP 公式サンプルから東京 23 区付近の POI（152,127 行）を切り出し、並び順だけを変えたものです。
 
 | ボタン | ファイル | 並び順 |
@@ -94,9 +95,10 @@ COGP 公式サンプルから東京 23 区付近の POI（152,127 行）を切�
 | 元の順 | `tokyo-id.parquet` | 通常の GeoParquet。id 順（場所とはほぼ無関係） |
 | Hilbert 順 | `tokyo-hilbert.parquet` | 通常の GeoParquet。Hilbert 曲線の順（近い地物が同じ Row Group に入る） |
 | COGP | `tokyo.cogp.parquet` | cogp v1.0.0 で変換した COGP（16 Level） |
+| COGP（2.0） | `tokyo.cogp-v2.parquet` | COGP の geometry 列を GEOMETRY 論理型にした GeoParquet 2.0 版（並びと Level は COGP と同じ） |
 
 行・列・圧縮・Row Group（8,192 行）とページ（1,024 行）の大きさはそろえてあります。
-COGP を開いて Access Simulator を ON にし、「比較対象」に残りの 2 つを選ぶと、同じ表示範囲で読む量を比べられます。
+COGP を開いて Access Simulator を ON にし、「比較対象」に残りのサンプルを選ぶと、同じ表示範囲で読む量を比べられます。
 データは © OpenStreetMap contributors で、[ODbL](https://opendatacommons.org/licenses/odbl/) のもとで提供されています。
 
 開発サーバーは `samples/` を Range 付きで配信します。公開版は GitHub Pages に置かず、Cloudflare R2 から読みます
@@ -107,7 +109,10 @@ COGP を開いて Access Simulator を ON にし、「比較対象」に残り�
 
 ```sh
 uv run scripts/make_samples.py --source data/pois.cogp.parquet --cogp /path/to/cogp
+uv run scripts/make_samples.py   # --cogp を省くと、既存の COGP から 2.0 版だけを作り直す
 ```
+
+GeoParquet 2.0 の小さなテスト用ファイル（apache/parquet-testing ほか、Apache License 2.0）は `test/fixtures/geo2/` にあります。
 
 開発では COGP 公式サンプル（OSM 由来の POI、約 2.2GB）を `data/` に置いて使います。
 `data/` は Git 管理外です。

@@ -1,9 +1,10 @@
 /**
- * 同梱の比較用サンプル（design.md D43・D45）。scripts/make_samples.py で公式サンプルから東京 23 区付近を切り出したもの。
- * 3 つは行・列・圧縮・Row Group とページの大きさがそろっていて、並び順（と COGP の Level）だけが違う。
+ * 同梱の比較用サンプル（design.md D43・D45・D49）。scripts/make_samples.py で公式サンプルから東京 23 区付近を切り出したもの。
+ * 4 つは行・列・圧縮・Row Group とページの大きさがそろっていて、並び順（と COGP の Level）だけが違う。
+ * COGP（2.0）は COGP と同じ並びで、geometry 列の型（GEOMETRY 論理型か BYTE_ARRAY か）と geo の version だけが違う。
  */
 export interface Sample {
-  id: 'id' | 'hilbert' | 'cogp'
+  id: 'id' | 'hilbert' | 'cogp' | 'cogp-v2'
   label: string
   file: string
   description: string
@@ -13,6 +14,12 @@ export const SAMPLES: Sample[] = [
   { id: 'id', label: '元の順', file: 'tokyo-id.parquet', description: '通常の GeoParquet。行は id 順（OSM の登録順）で、場所とはほぼ無関係に並ぶ' },
   { id: 'hilbert', label: 'Hilbert 順', file: 'tokyo-hilbert.parquet', description: '通常の GeoParquet。行を Hilbert 曲線の順に並べ、近い地物が同じ Row Group・ページに入る' },
   { id: 'cogp', label: 'COGP', file: 'tokyo.cogp.parquet', description: 'cogp v1.0.0 で変換した COGP。粗い Level から細かい Level の順に Row Group を並べる' },
+  {
+    id: 'cogp-v2',
+    label: 'COGP（2.0）',
+    file: 'tokyo.cogp-v2.parquet',
+    description: 'COGP の geometry 列を Parquet ネイティブの GEOMETRY 論理型で書き直した GeoParquet 2.0 版。Row Group と Level は COGP と同じ',
+  },
 ]
 
 export const SAMPLE_ATTRIBUTION = '© OpenStreetMap contributors（ODbL）。COGP 公式サンプル pois.cogp.parquet から切り出し'

@@ -15,4 +15,5 @@ GeoParquet 2.0（rc.1、2026-07）では Parquet ネイティブの GEOMETRY / G
 - `geo` と論理型の CRS が食い違うときの表示
 
 ## 結論
-design.md §3.5（D46〜D52）で方針を決定。実装は段階 A〜D で進める。
+design.md §3.5（D46〜D52）で対応済み。geo の無いファイルは論理型から組み立て、CRS は論理型を正として geo と並べて表示し、食い違いは診断で MUST 違反にする。日付変更線をまたぐ bbox は 2 つに分けて判定する。テスト用に apache/parquet-testing ほかの小さなファイルを `test/fixtures/geo2/` に置き、東京の COGP を論理型で書き直した `tokyo.cogp-v2.parquet` をサンプルに加えた。
+残り: 日付変更線をまたぐ実ファイルでの確認。

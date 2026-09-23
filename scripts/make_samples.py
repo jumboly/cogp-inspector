@@ -1,20 +1,22 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyarrow==25.0.1", "numpy"]
+# dependencies = ["pyarrow==25.0.1", "numpy", "geoarrow-pyarrow==0.2.0"]
 # ///
-"""比較用サンプル 3 種類を作る（design.md D43）。
+"""比較用サンプル 4 種類を作る（design.md D43・D49）。
 
 公式サンプル（全世界の POI、COGP）から東京 23 区付近を切り出し、次の 3 つを samples/ に書く。
 
 1. tokyo-id.parquet       元の順（id 順）の通常 GeoParquet
 2. tokyo-hilbert.parquet  Hilbert 順の通常 GeoParquet
 3. tokyo.cogp.parquet     1. を cogp（参照実装 CLI）で変換した COGP
+4. tokyo.cogp-v2.parquet  3. の geometry 列を Parquet ネイティブの GEOMETRY 論理型で書き直した GeoParquet 2.0 版
 
 1 と 2 の差で「空間的にまとめる」効果、2 と 3 の差で「Level がある」効果を分けて見るため、
 行・列・圧縮・Row Group の大きさ・ページの大きさ・Page Index の有無をそろえる。
 
 使い方:
     uv run scripts/make_samples.py --source data/pois.cogp.parquet --cogp /path/to/cogp
+    uv run scripts/make_samples.py   # --cogp を省くと、既存の 3. から 4. だけを作り直す
 
 cogp は https://github.com/Kanahiro/cloud-optimized-geoparquet/releases/tag/v1.0.0 の
 バイナリ（または同タグの cogp-rs をビルドしたもの）を使う。
@@ -25,6 +27,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import geoarrow.pyarrow as ga
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -43,6 +46,7 @@ PAGE_ROW_COUNT = 1024
 COMPRESSION = "zstd"
 COMPRESSION_LEVEL = 3
 DICTIONARY_COLUMNS = ["id", "tags"]
+DICTIONARY_LEAF_COLUMNS = ["id", "tags.key_value.key", "tags.key_value.value"]
 
 HILBERT_ORDER = 16
 
@@ -132,13 +136,62 @@ def write_geoparquet(table: pa.Table, path: Path) -> None:
         w.add_key_value_metadata({"geo": json.dumps(geo_metadata(table))})
 
 
+def write_native_cogp(src: Path, dst: Path) -> None:
+    """COGP の geometry 列を GEOMETRY 論理型にし、geo を 2.0.0 にして書き直す（design.md D49 (b)）。
+
+    Row Group の境界（＝ Level の境界）と行の順は変えない。lod と covering はそのまま残す。
+    1.1 版と同じ条件で比べられるよう、圧縮・ページの大きさ・Page Index は write_geoparquet と同じにする
+    """
+    pf = pq.ParquetFile(src)
+    geo = json.loads(pf.metadata.metadata[b"geo"])
+    geo["version"] = "2.0.0"
+    # geoarrow の WKB 拡張型にすると、pyarrow が GEOMETRY 論理型と geospatial_statistics を書く。
+    # crs を持たせないので論理型の crs は省略（＝ OGC:CRS84）になり、geo 側の crs 省略と同じ CRS になる
+    schema = pf.schema_arrow
+    i = schema.get_field_index("geometry")
+    schema = schema.set(i, pa.field("geometry", ga.wkb(), nullable=schema.field(i).nullable))
+    with pq.ParquetWriter(
+        dst,
+        schema,
+        compression=COMPRESSION,
+        compression_level=COMPRESSION_LEVEL,
+        # pyarrow は入れ子の列を葉のパスで指定しないと辞書を使わない（"tags" だけでは tags.key_value.* に効かない）。
+        # 元の COGP（cogp が書いたもの）は tags の葉も辞書にしているので、そろえる
+        use_dictionary=DICTIONARY_LEAF_COLUMNS,
+        write_statistics=True,
+        write_page_index=True,
+        max_rows_per_page=PAGE_ROW_COUNT,
+        data_page_size=64 * 1024 * 1024,
+        store_schema=False,
+    ) as w:
+        for rg in range(pf.metadata.num_row_groups):
+            t = pf.read_row_group(rg)
+            t = t.set_column(i, "geometry", ga.as_wkb(t.column(i).combine_chunks()))
+            # Row Group ごとに 1 回書き、行数をその Row Group の行数にして境界を保つ
+            w.write_table(t, row_group_size=t.num_rows)
+        w.add_key_value_metadata({"geo": json.dumps(geo)})
+    out = pq.ParquetFile(dst).metadata
+    assert out.num_row_groups == pf.metadata.num_row_groups, "Row Group の数が変わった"
+    assert all(out.row_group(k).num_rows == pf.metadata.row_group(k).num_rows for k in range(out.num_row_groups)), "Row Group の境界が変わった"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", type=Path, default=Path("data/pois.cogp.parquet"))
-    ap.add_argument("--cogp", type=Path, required=True, help="cogp v1.0.0 の CLI")
+    ap.add_argument("--cogp", type=Path, help="cogp v1.0.0 の CLI。省くと既存の tokyo.cogp.parquet から 2.0 版だけを作り直す")
     ap.add_argument("--out", type=Path, default=Path("samples"))
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.cogp:
+        make_v1_samples(args)
+    write_native_cogp(args.out / "tokyo.cogp.parquet", args.out / "tokyo.cogp-v2.parquet")
+
+    for p in sorted(args.out.glob("*.parquet")):
+        md = pq.ParquetFile(p).metadata
+        print(f"{p.name}: {p.stat().st_size:,} B, {md.num_row_groups} RG, {md.num_rows} rows")
+
+
+def make_v1_samples(args: argparse.Namespace) -> None:
 
     table = read_region(args.source)
     # 「元の順」は id 順とする。OSM の id は登録順で、場所とはほぼ無関係に並ぶ
@@ -173,10 +226,6 @@ def main() -> None:
         check=True,
     )
     subprocess.run([str(args.cogp), "validate", str(args.out / "tokyo.cogp.parquet")], check=True)
-
-    for p in sorted(args.out.glob("*.parquet")):
-        md = pq.ParquetFile(p).metadata
-        print(f"{p.name}: {p.stat().st_size:,} B, {md.num_row_groups} RG, {md.num_rows} rows")
 
 
 if __name__ == "__main__":

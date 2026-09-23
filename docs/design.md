@@ -357,6 +357,19 @@ D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「お
 - ブラウザで確かめた結果: `crs-default.parquet`（geo なし）は「MUST 違反 1」、geoparquet の `example.parquet` は 2.0 の 3 項目とも満たし「MUST OK」。
 - なお、このプロジェクトに linter は無い。確認は `tsc -b`・vitest・`vite build` で行う。
 
+実装メモ（段階 D）:
+
+- `make_samples.py` に `write_native_cogp` を足し、`tokyo.cogp.parquet` から `tokyo.cogp-v2.parquet` を作る。Row Group を 1 つずつ読んで同じ行数で書き、Level の境界と行の順を保つ。
+  geometry 列は geoarrow-pyarrow の WKB 拡張型にすると、pyarrow 25 が GEOMETRY 論理型と `geospatial_statistics` を書く（拡張型のメタデータをフィールドに付けるだけでは論理型にならなかった）。crs を持たせないので、論理型の crs は省略（＝ OGC:CRS84）になる。
+  geo は version を 2.0.0 にし、lod と covering はそのまま残す。
+- cogp v1.0.0 の CLI がこの環境に無かったため、`--cogp` を省くと 2.0 版だけを作り直すようにした。lod の検証は cogp validate ではなく、Inspector の診断とテストで行う。
+- 生成結果: 11.5MB（1.1 版の COGP は 11.8MB）・28 RG・16 Level。診断は 2.0 の 3 項目を含めて MUST をすべて満たす。
+  Row Group の bbox（covering の統計を優先）、選ばれる Level、Row Group・ページの絞り込みは、1.1 版の COGP と同じになる（`test/samples.test.ts`）。圧縮後のバイト数は書き手（pyarrow と parquet-rs）の違いで少し変わる。
+- ブラウザで確かめた結果（23 区全体の表示）: Level 8 → 9 回の Range Request で 10,169 行を decode し、描けない行は 0。Expected と Actual はすべて一致した。
+- 見つけた問題: pyarrow は入れ子の列を葉のパスで指定しないと辞書を使わない。`write_geoparquet` の `use_dictionary=["id", "tags"]` は tags の葉に効いておらず、既存の `tokyo-id.parquet`・`tokyo-hilbert.parquet` の tags は PLAIN のまま（COGP は辞書あり）。
+  段階 E の「そろえた条件」の記述と食い違う。2.0 版は葉のパスを指定して COGP にそろえた。既存の 2 つは、作り直すとサンプル・R2・テストの期待値が変わるので、別に扱う。
+- 日付変更線をまたぐ bbox（段階 B）は、実ファイルでは確かめられていない。pyarrow は GEOMETRY では平面の bbox を書き、xmin > xmax のファイルを作れないため。
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text
@@ -397,7 +410,7 @@ cogp-inspector/
 │ ├ state/     store.ts（ファイル・選択・trace の共有状態。zustand を想定）
 │ ├ ui/        layout/, tree/, map/, inspector/, bytemap/, help/
 │ └ main.tsx
-├ samples/         比較用サンプル 3 種類（元の順 / Hilbert 順 / COGP、各約 12MB。テストでも使う。公開版は R2 から配信）
+├ samples/         比較用サンプル 4 種類（元の順 / Hilbert 順 / COGP / COGP 2.0、各約 12MB。テストでも使う。公開版は R2 から配信）
 ├ scripts/         make_samples.py（サンプルの生成）
 ├ data/            大容量サンプル（Git 管理外、ハードリンク）
 ├ docs/            設計メモ・Issue 下書き
@@ -413,3 +426,4 @@ cogp-inspector/
   Row Group Inspector、Physical File Map 基本版
 - Phase 2（実装済み）: Column Chunk 詳細、Page、Dictionary、Page Index、Page bbox、Page pruning、Access Simulator、Range Request 可視化
 - Phase 3（実装済み・§3.4）: 実データ描画、progressive rendering、Expected vs Actual 比較、診断、比較用サンプルの生成と通常 GeoParquet との比較
+- GeoParquet 2.0（実装済み・§3.5）: 論理型の GEOMETRY / GEOGRAPHY、論理型の crs、geo の無いファイル、日付変更線をまたぐ bbox、2.0 の MUST の診断、2.0 版のサンプル
