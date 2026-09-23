@@ -1,4 +1,4 @@
-import type { Bbox } from '../geo/bbox'
+import { worldWidth, wrapsX, type Bbox } from '../geo/bbox'
 import type { PageBboxes } from '../geo/pageBbox'
 import type { Inspection } from '../inspect'
 import type { Selection } from '../state/store'
@@ -46,9 +46,24 @@ export const GROUP_LABEL: Record<DiagGroup, string> = {
 
 const area = (b: Bbox) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1])
 
-function enclose(bs: Bbox[]): Bbox | undefined {
+function enclose(bs: Bbox[], width?: number): Bbox | undefined {
   if (!bs.length) return undefined
-  return bs.reduce<Bbox>((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])], [...bs[0]] as Bbox)
+  const e = bs.reduce<Bbox>((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])], [...bs[0]] as Bbox)
+  // 日付変更線をまたぐ bbox を一周分ずらして並べると、合わせた範囲が一周より広くなり得るので一周で止める
+  if (width !== undefined && e[2] - e[0] > width) e[2] = e[0] + width
+  return e
+}
+
+/**
+ * 面積の計算に使う Row Group の bbox。日付変更線をまたぐ bbox（xmin > xmax）は xmax に一周分を足して幅を正にする（D48）。
+ * 一周の幅が分からない CRS でまたいでいる bbox は、面積が求められないので計算から外す
+ */
+function planarBboxes(ins: Inspection): (Bbox | undefined)[] {
+  const width = worldWidth(ins.geo?.primary?.crs.mapProjection ?? null)
+  return ins.rowGroupBboxes.map(({ bbox: b }) => {
+    if (!b || !wrapsX(b)) return b
+    return width === undefined ? undefined : [b[0], b[1], b[2] + width, b[3]]
+  })
 }
 
 export interface LevelOverlap {
@@ -67,11 +82,12 @@ export interface LevelOverlap {
 /** RG from..to（含む）の重なり係数。bbox が無い Row Group は計算に入れない */
 function overlapOf(ins: Inspection, from: number, to: number): { withBbox: number; coefficient?: number } {
   const bs: Bbox[] = []
+  const planar = planarBboxes(ins)
   for (let rg = Math.max(from, 0); rg <= Math.min(to, ins.file.rowGroups.length - 1); rg++) {
-    const b = ins.rowGroupBboxes[rg]?.bbox
+    const b = planar[rg]
     if (b) bs.push(b)
   }
-  const all = enclose(bs)
+  const all = enclose(bs, worldWidth(ins.geo?.primary?.crs.mapProjection ?? null))
   const total = all ? area(all) : 0
   return { withBbox: bs.length, coefficient: total > 0 ? bs.reduce((a, b) => a + area(b), 0) / total : undefined }
 }
@@ -202,8 +218,10 @@ export function diagnose(ins: Inspection, pageBboxOf: (rg: number) => PageBboxes
       })),
     })
     const l0 = lod.levels[0]
-    const l0Bbox = l0 && enclose(bboxes.slice(0, l0.rowGroupEnd + 1).flatMap((b) => (b.bbox ? [b.bbox] : [])))
-    const allBbox = enclose(bboxes.flatMap((b) => (b.bbox ? [b.bbox] : [])))
+    const planar = planarBboxes(ins)
+    const width = worldWidth(geo?.primary?.crs.mapProjection ?? null)
+    const l0Bbox = l0 && enclose(planar.slice(0, l0.rowGroupEnd + 1).flatMap((b) => (b ? [b] : [])), width)
+    const allBbox = enclose(planar.flatMap((b) => (b ? [b] : [])), width)
     if (l0Bbox && allBbox && area(allBbox) > 0) {
       items.push({
         id: 'coarse-spread',

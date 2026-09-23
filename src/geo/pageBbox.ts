@@ -1,7 +1,7 @@
 import type { ColumnChunkModel, RowGroupModel } from '../parquet/model'
 import type { ColumnIndexModel, OffsetIndexModel } from '../parquet/pageIndex'
 import type { IndexKind, PageCache } from '../parquet/pages'
-import type { Bbox } from './bbox'
+import { splitWrapped, wrapsX, type Bbox } from './bbox'
 import type { GeoModel } from './geoMetadata'
 
 /** Row Group 内の行の半開区間 [start, end) */
@@ -76,8 +76,12 @@ export function pageBboxes(numRows: number, ois: (OffsetIndexModel | undefined)[
   return { available: true, aligned, spans }
 }
 
+const plainIntersects = (a: Bbox, b: Bbox) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+
+/** 2 つの bbox が重なるか。日付変更線をまたぐ bbox（xmin > xmax）は 2 つに分けて、どちらかに重なれば重なるとする（D48） */
 export function intersects(a: Bbox, b: Bbox): boolean {
-  return a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+  if (!wrapsX(a) && !wrapsX(b)) return plainIntersects(a, b)
+  return splitWrapped(a).some((pa) => splitWrapped(b).some((pb) => plainIntersects(pa, pb)))
 }
 
 /** Page bbox を求めるのに読む必要がある Index（covering 4 列の OffsetIndex と ColumnIndex） */

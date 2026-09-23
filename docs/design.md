@@ -337,6 +337,15 @@ D46〜D49 はユーザーと 1 問ずつ議論して決定。D50 以降は「お
 - Column Chunk の Inspector は、論理型の列について min/max に「判定に使わない」と添え、`geospatial_statistics` の bbox（z・m があれば別の行）と `geospatial_types` を出す。
 - `test/fixtures/geo2/` の公開ファイルで確かめた: crs の 4 通りの表記、geo の無いファイルの Row Group bbox、GEOGRAPHY（50 Row Group）、論理型の列の decode。
 
+実装メモ（段階 B）:
+
+- `Bbox` の型はそのままにし、xmin > xmax を「日付変更線をまたぐ」と読む（`wrapsX`）。重なり判定（`intersects`）は、またぐ bbox を端が ±Infinity の 2 つに分けて比べる。
+  ±180 で切らないのは、「x ≥ xmin または x ≤ xmax」をそのまま表せば、CRS の座標の範囲（経緯度か 3857 のメートルか）に依らないため。表示範囲の側は、以前から `viewportBoxes` が日付変更線で 2 つに分けている。
+- 地図に描くときは、`toLonLatBbox` で xmax に 360 を足して 1 つの矩形にする。MapLibre は ±180 を超える経度を隣の世界として続けて描くので、Row Group・ページの矩形、fitBounds、クリック判定の面積を 1 か所の変更で直せた。
+- 診断の面積（重なり係数・Level 0 がデータ全体の範囲の何 % を覆うか）は、またぐ bbox の xmax に一周分（360° または 2 × 20,037,508 m）を足して計算する。合わせた範囲は一周で止める。一周の幅が分からない CRS でまたぐ bbox は、計算から外す。
+- GEOGRAPHY の列を描いたときは、funnel の「6. 読んで decode する」の注記に「辺は本来は球面上の曲線だが、直線で結んで描いている」と足した。Row Group の bbox がまたぐときは、Row Group の Inspector に読み方を添える。
+- 日付変更線をまたぐ実ファイルは、手元の fixture には無い。確かめたのは作った値のテストだけで、実ファイルでの確認は段階 D に回す。
+
 ## 4. アーキテクチャ（MVP で実装済み）
 
 ```text

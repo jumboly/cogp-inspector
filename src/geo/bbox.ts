@@ -54,13 +54,40 @@ export function rowGroupBboxes(file: FileModel, geo: GeoModel | undefined): RowG
   return file.rowGroups.map((rg) => rowGroupBbox(rg, geo))
 }
 
-/** 地図（経緯度）に載せる形へ変換する。載せられない CRS なら undefined */
+/**
+ * 日付変更線をまたぐ bbox か。Parquet の Geospatial 仕様では X だけ xmin > xmax になり得て、
+ * そのときは「x >= xmin または x <= xmax」と読む（design.md D48）
+ */
+export const wrapsX = (b: Bbox) => b[0] > b[2]
+
+/**
+ * 重なり判定のために、日付変更線をまたぐ bbox を 2 つに分ける。
+ * 端を ±Infinity にするのは、「x >= xmin または x <= xmax」をそのまま表し、CRS の座標の範囲（±180 か ±20037508 か）に依らないため
+ */
+export function splitWrapped(b: Bbox): Bbox[] {
+  return wrapsX(b) ? [[b[0], b[1], Infinity, b[3]], [-Infinity, b[1], b[2], b[3]]] : [b]
+}
+
+/** CRS の X 方向の一周の幅。日付変更線をまたぐ bbox の幅と面積を求めるのに使う。分からない CRS は undefined */
+export function worldWidth(projection: MapProjection): number | undefined {
+  if (projection === 'lonlat') return 360
+  if (projection === 'webmercator') return 2 * 20037508.342789244
+  return undefined
+}
+
+/**
+ * 地図（経緯度）に載せる形へ変換する。載せられない CRS なら undefined。
+ * 日付変更線をまたぐ bbox は xmax に 360 を足して返す。MapLibre は ±180 を超える経度を隣の世界として続けて描くので、
+ * 1 つの矩形のまま日付変更線をまたいで描け、fitBounds・面積の計算もそのまま使えるため
+ */
 export function toLonLatBbox(b: Bbox, projection: MapProjection): Bbox | undefined {
-  if (projection === 'lonlat') return b
-  if (projection === 'webmercator') {
+  let out: Bbox
+  if (projection === 'lonlat') out = [...b]
+  else if (projection === 'webmercator') {
     const [x0, y0] = mercatorToLonLat(b[0], b[1])
     const [x1, y1] = mercatorToLonLat(b[2], b[3])
-    return [x0, y0, x1, y1]
-  }
-  return undefined
+    out = [x0, y0, x1, y1]
+  } else return undefined
+  if (wrapsX(out)) out[2] += 360
+  return out
 }

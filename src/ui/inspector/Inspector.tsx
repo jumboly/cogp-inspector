@@ -1,4 +1,5 @@
 import { levelOfRowGroup } from '../../cogp/lod'
+import { wrapsX } from '../../geo/bbox'
 import { sameCrs, type CrsInfo } from '../../geo/crs'
 import { wkbTypeName } from '../../geo/geometryTypes'
 import type { Inspection } from '../../inspect'
@@ -317,7 +318,7 @@ function RowGroupView({ ins, rg }: { ins: Inspection; rg: number }) {
         rows={[
           ['COGP Level', lv ?? '-', lv !== undefined ? `Level ${lv} 以降の表示で読まれる` : undefined],
           ['行数', formatNumber(r.numRows), `ファイル全体の行番号 ${formatNumber(r.firstRow)}〜${formatNumber(r.firstRow + r.numRows - 1)}`],
-          ['bbox', b.bbox ? b.bbox.map((v) => v.toFixed(5)).join(', ') : '不明', BBOX_SOURCE[b.source] + (b.note ? `（${b.note}）` : '')],
+          ['bbox', b.bbox ? b.bbox.map((v) => v.toFixed(5)).join(', ') : '不明', BBOX_SOURCE[b.source] + (b.note ? `（${b.note}）` : '') + (b.bbox && wrapsX(b.bbox) ? '。xmin > xmax は日付変更線をまたぐ範囲（x ≥ xmin または x ≤ xmax）' : '')],
           ['圧縮後サイズ', `${formatBytes(r.compressedSize)}（ファイルの ${formatPercent(r.compressedSize, ins.file.size)}）`],
           ['非圧縮サイズ total_byte_size', formatBytes(r.totalByteSize)],
           ['ファイル内の範囲', formatRange(r.range)],

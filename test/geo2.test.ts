@@ -1,9 +1,12 @@
 import { compressors } from 'hyparquet-compressors'
 import { describe, expect, it } from 'vitest'
 import { readPlanData, type DecodedFeature } from '../src/data/readData'
+import { fileOverlap } from '../src/diagnose/diagnose'
+import { toLonLatBbox, type Bbox } from '../src/geo/bbox'
 import { describeLogicalCrs, sameCrs } from '../src/geo/crs'
 import { wkbTypeName } from '../src/geo/geometryTypes'
-import { fileKind, inspect } from '../src/inspect'
+import { intersects } from '../src/geo/pageBbox'
+import { fileKind, inspect, type Inspection } from '../src/inspect'
 import { TracedSource } from '../src/io/traced'
 import { PageCache } from '../src/parquet/pages'
 import { defaultColumns, planAccess } from '../src/plan/accessPlan'
@@ -87,5 +90,36 @@ describe('GeoParquet 2.0 の実ファイル', () => {
     expect(res.readRows).toBeGreaterThan(0)
     expect(res.emptyRows).toBe(0)
     expect(features[0].geometry.type).toBe('Polygon')
+  })
+})
+
+describe('日付変更線をまたぐ bbox（xmin > xmax、D48）', () => {
+  // 東経 170° から西経 170° まで（日付変更線をはさんで 20° 幅）
+  const wrapped: Bbox = [170, -10, -170, 10]
+
+  it('どちら側の表示範囲とも重なり、反対側の地域とは重ならない', () => {
+    expect(intersects(wrapped, [175, 0, 180, 5])).toBe(true)
+    expect(intersects(wrapped, [-180, 0, -175, 5])).toBe(true)
+    expect(intersects(wrapped, [0, 0, 10, 5])).toBe(false)
+    // 両方がまたいでいれば、日付変更線の上で必ず重なる
+    expect(intersects(wrapped, [179, 0, -179, 5])).toBe(true)
+  })
+
+  it('地図用には xmax に 360 を足し、1 つの矩形として日付変更線をまたいで描く', () => {
+    expect(toLonLatBbox(wrapped, 'lonlat')).toEqual([170, -10, 190, 10])
+    expect(toLonLatBbox([10, 0, 20, 5], 'lonlat')).toEqual([10, 0, 20, 5])
+  })
+
+  it('重なり係数は一周分ずらした幅（20°）で面積を求める', () => {
+    const ins = {
+      file: { rowGroups: [{}, {}] },
+      geo: { primary: { crs: { mapProjection: 'lonlat' } } },
+      rowGroupBboxes: [
+        { bbox: wrapped, source: 'geospatial-stats' },
+        { bbox: [170, -10, 180, 10], source: 'geospatial-stats' },
+      ],
+    } as unknown as Inspection
+    // 面積の合計 20×20 + 10×20 = 600、合わせた範囲 20×20 = 400
+    expect(fileOverlap(ins).coefficient).toBeCloseTo(1.5)
   })
 })

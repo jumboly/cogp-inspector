@@ -144,7 +144,7 @@ function Funnel({ ins, plan, focus, running }: { ins: Inspection; plan: AccessPl
       bytes: s.requests.bytes,
       note: <>隣接・重なるページ範囲を 1 回の Range Request にまとめる（隙間は埋めない）。全列なら {formatNumber(s.requests.logicalAll)} → {formatNumber(s.requests.coalescedAll)} 回</>,
     },
-    decodeRow(data, plan),
+    decodeRow(data, plan, ins.geo?.primary?.logical?.type === 'GEOGRAPHY'),
   ]
 
   return (
@@ -208,7 +208,7 @@ const BLOCKER_NOTE: Record<DataBlocker, string> = {
 }
 
 /** 6. 実データの decode（design.md D31〜D36）。行単位の判定まで行い、読んだ行と範囲内の行を比べる */
-function decodeRow(data: DataState, plan: AccessPlan): Row {
+function decodeRow(data: DataState, plan: AccessPlan, geography: boolean): Row {
   const label = '6. 読んで decode する'
   if (!data.enabled) return { label, count: '-', note: '「実データを読む」を ON にすると、この計画どおりにデータページを読み、geometry を decode して地図に描きます' }
   if (data.status === 'blocked' && data.blocker) return { label, count: '読まない', note: BLOCKER_NOTE[data.blocker] }
@@ -238,6 +238,8 @@ function decodeRow(data: DataState, plan: AccessPlan): Row {
         {formatNumber(r.requests)} 回の Range Request で読み（{Math.round(r.ms)} ms）、geometry を decode した。読んだページが覆う {formatNumber(r.readRows)} 行のうち、ジオメトリの bbox が表示範囲と重なるのは {formatNumber(r.inViewRows)} 行（
         {formatPercent(r.inViewRows, r.readRows)}）。残りはページ単位の絞り込みでは除けず「読んだが捨てる」行（地図の灰色の点）
         {r.emptyRows > 0 && `。geometry が空で描けない行 ${formatNumber(r.emptyRows)}`}
+        {/* GEOGRAPHY の辺は球面上の最短経路だが、地図には頂点を平面の直線で結んで描く（D48）。見た目と本来の形がずれることを断っておく */}
+        {geography && '。GEOGRAPHY 型なので本来の辺は球面上の曲線だが、地図には頂点を直線で結んで描いている（長い辺ほど本来の形とずれる）'}
       </>
     ),
   }
